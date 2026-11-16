@@ -8,6 +8,10 @@ Local AI/LLMs only (max privacy), no accounts, no subscriptions, no cloud, no hi
 
 *Parla is built to stay lightweight and run on laptops with modest hardware, not only high-end machines.*
 
+## Support this Project if you like it
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-shambix-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/shambix) or [![Sponsor this on GitHub](https://img.shields.io/github/sponsors/Jany-M?label=Sponsor&logo=githubsponsors&logoColor=white&color=EA4AAA)](https://github.com/sponsors/Jany-M)
+
 ## Features
 
 * **Record & pause** in one continuous transcript (resume without starting a new meeting)
@@ -16,9 +20,9 @@ Local AI/LLMs only (max privacy), no accounts, no subscriptions, no cloud, no hi
 * **Summarize on demand** after a meeting (or skip it)
 * **Export to Markdown** (`.md`) for notes elsewhere
 
-## Support this Project if you like it
+<img width="2874" height="1995" alt="screenshot_recording" src="https://github.com/user-attachments/assets/2a79146c-2f8f-44d9-bd01-d325ef5d921b" />
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-shambix-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/shambix) or [![Sponsor this on GitHub](https://img.shields.io/github/sponsors/Jany-M?label=Sponsor&logo=githubsponsors&logoColor=white&color=EA4AAA)](https://github.com/sponsors/Jany-M)
+<img width="3822" height="1209" alt="screenshot_library" src="https://github.com/user-attachments/assets/88f27b9c-91b9-4207-83c7-d0278d7ab9b7" />
 
 ## Requirements
 
