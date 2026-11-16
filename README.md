@@ -7,6 +7,22 @@ No accounts, no subscriptions, no cloud, free forever; models run on your machin
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-shambix-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/shambix) or [![Sponsor this on GitHub](https://img.shields.io/github/sponsors/Jany-M?label=Sponsor&logo=githubsponsors&logoColor=white&color=EA4AAA)](https://github.com/sponsors/Jany-M)
 
+## Models
+
+Downloaded on first use and run fully offline (see `resources/manifest.json`) for max privacy (nothing leaves your PC).
+
+| Role | Model | Notes |
+|---|---|---|
+| Speech recognition (STT) | Parakeet TDT 0.6B v3 (int8) | 25 European languages incl. IT/EN/FR; CPU. CC-BY-4.0 (NVIDIA) |
+| Voice activity (VAD) | Silero VAD | Finds where people are speaking. MIT |
+| Speaker labels | WeSpeaker ResNet34 | Separates voices for per-person labels. Apache-2.0 |
+| Live translation | Hy-MT2 1.8B (Q4_K_M) | Loaded only while translation is on. Apache-2.0 (Tencent) |
+| Summaries (8 GB+) | Qwen3.5 2B (Q4_K_M) | Compact notes model. Apache-2.0 (Alibaba) |
+| Summaries (16 GB+) | Qwen3.5 4B (Q4_K_M) | Higher-quality notes when RAM allows. Apache-2.0 (Alibaba) |
+| LLM runtime | llama.cpp (Windows CPU build) | Serves translation and summary GGUFs locally. MIT |
+
+You can also point translate/summarize slots at a local GGUF or an OpenAI-compatible endpoint (e.g. LM Studio, Ollama).
+
 ## Install, data and uninstall
 
 Download and install the latest .exe from GitHub, or build it yourself (see step below).

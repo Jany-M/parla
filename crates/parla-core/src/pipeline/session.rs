@@ -59,7 +59,7 @@ struct StreamState {
 
 const HISTORY_MAX: usize = 40 * 16_000;
 const HISTORY_KEEP: usize = 30 * 16_000;
-const PAD_BEFORE: u64 = 8_000; // 0.5 s: soft first syllables and slow microphone gain-up
+const PAD_BEFORE: u64 = 12_000; // 0.75 s: soft first syllables, Bluetooth/mic AGC ramp-up
 const PAD_AFTER: u64 = 3_200; // 0.2 s
 
 /// Raises quiet audio (laptop and headset microphones) to a level the recogniser handles well.
@@ -583,7 +583,8 @@ mod tests {
         let mut s = Session::new(store, meeting, engine, Arc::new(VecSink::default()), cfg0(), Session::energy_detector_factory());
         burst(&mut s, StreamKind::System, 1.0, 0.3, 1.5);
         let seen = lens.lock().unwrap()[0];
-        // about 1.5 s of speech, never less than the detector's own chunk, plus at most the padding
-        assert!((20_000..40_000).contains(&seen), "got {seen}");
+        // ~1.5 s speech + EnergyDetector preroll/hangover keep + PAD_BEFORE/AFTER (≈45600 with 0.75 s lead-in).
+        // Must be more than bare speech and far less than the full 3.5 s burst buffer (56000).
+        assert!((30_000..55_000).contains(&seen), "got {seen}");
     }
 }

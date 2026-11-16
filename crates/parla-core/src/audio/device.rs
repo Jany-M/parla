@@ -9,10 +9,42 @@ use anyhow::{anyhow, bail, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// Short settle for every mic (AGC / first callback jitter), in 16 kHz mono samples.
+pub const MIC_WARMUP_SAMPLES: u64 = 4_800; // 0.3 s
+/// Extra discard when the device looks like Bluetooth SCO/HFP (~0.5–1.5 s profile switch).
+pub const MIC_BT_WARMUP_SAMPLES: u64 = 20_000; // 1.25 s
+
+fn looks_like_bluetooth(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    // Common Windows/macOS labels for BT headsets and hands-free AG profiles.
+    [
+        "bluetooth",
+        "hands-free", // Windows BT AG profile (avoid bare "headset" — many wired mics use it)
+        "handsfree",
+        "airpods",
+        "galaxy buds",
+        "wh-",
+        "wf-",
+        "hfp",
+        "sco",
+        "le audio",
+    ]
+    .iter()
+    .any(|k| n.contains(k))
+}
+
+fn mic_warmup_samples(device_name: &str) -> u64 {
+    if looks_like_bluetooth(device_name) {
+        MIC_BT_WARMUP_SAMPLES
+    } else {
+        MIC_WARMUP_SAMPLES
+    }
+}
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct DeviceInfo {
@@ -72,18 +104,38 @@ impl DeviceSource {
     }
 }
 
-fn build<T>(device: &cpal::Device, cfg: cpal::StreamConfig, kind: StreamKind, tx: SyncSender<Frame>, failure: Arc<Mutex<Option<String>>>) -> Result<cpal::Stream>
+fn build<T>(
+    device: &cpal::Device,
+    cfg: cpal::StreamConfig,
+    kind: StreamKind,
+    tx: SyncSender<Frame>,
+    failure: Arc<Mutex<Option<String>>>,
+    warmup: u64,
+) -> Result<cpal::Stream>
 where
     T: SizedSample + Send + 'static,
     f32: FromSample<T>,
 {
     let mut rs = MonoResampler::new(cfg.sample_rate, cfg.channels as usize)?;
     let mut acc: Vec<f32> = Vec::with_capacity(FRAME_SAMPLES * 2);
+    let warmed = AtomicU64::new(0);
+    let mut logged_ready = false;
     let stream = device.build_input_stream(
         cfg,
         move |data: &[T], _| {
             let f: Vec<f32> = data.iter().map(|s| s.to_sample::<f32>()).collect();
             let Ok(mono) = rs.process(&f) else { return };
+            if warmup > 0 {
+                let prev = warmed.fetch_add(mono.len() as u64, Ordering::Relaxed);
+                if prev < warmup {
+                    // Keep the resampler ticking so the link/AGC settle; do not feed the pipeline yet.
+                    return;
+                }
+                if !logged_ready {
+                    logged_ready = true;
+                    log::info!("microphone warm-up done ({warmup} samples discarded)");
+                }
+            }
             acc.extend(mono);
             while acc.len() >= FRAME_SAMPLES {
                 let samples: Vec<f32> = acc.drain(..FRAME_SAMPLES).collect();
@@ -111,12 +163,22 @@ impl AudioSource for DeviceSource {
         let supported = if self.loopback { device.default_output_config() } else { device.default_input_config() }.context("reading the audio device format")?;
         let (format, cfg) = (supported.sample_format(), supported.config());
         let failure = Arc::new(Mutex::new(None));
+        // Only the microphone needs a warm-up. Loopback must not drop the start of the meeting.
+        let device_name = device.description().ok().map(|x| x.name().to_string()).unwrap_or_default();
+        let warmup = if self.loopback { 0 } else { mic_warmup_samples(&device_name) };
+        if warmup > 0 {
+            log::info!(
+                "opening microphone '{device_name}' with {warmup} sample warm-up (~{:.2}s{})",
+                warmup as f64 / 16_000.0,
+                if looks_like_bluetooth(&device_name) { ", bluetooth" } else { "" }
+            );
+        }
         let (tx2, f2, kind) = (tx.clone(), failure.clone(), self.stream);
         let stream = match format {
-            SampleFormat::F32 => build::<f32>(&device, cfg, kind, tx2, f2),
-            SampleFormat::I16 => build::<i16>(&device, cfg, kind, tx2, f2),
-            SampleFormat::U16 => build::<u16>(&device, cfg, kind, tx2, f2),
-            SampleFormat::I32 => build::<i32>(&device, cfg, kind, tx2, f2),
+            SampleFormat::F32 => build::<f32>(&device, cfg, kind, tx2, f2, warmup),
+            SampleFormat::I16 => build::<i16>(&device, cfg, kind, tx2, f2, warmup),
+            SampleFormat::U16 => build::<u16>(&device, cfg, kind, tx2, f2, warmup),
+            SampleFormat::I32 => build::<i32>(&device, cfg, kind, tx2, f2, warmup),
             other => bail!("unsupported audio sample format {other:?}"),
         }
         .context("starting audio capture")?;
@@ -128,5 +190,32 @@ impl AudioSource for DeviceSource {
             std::thread::sleep(Duration::from_millis(100));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bluetooth_names_get_the_long_warmup() {
+        for name in [
+            "Headphones (Jabra Evolve2 65 Hands-Free AG)",
+            "AirPods Pro",
+            "WH-1000XM5",
+            "Galaxy Buds2 Pro Hands-Free AG",
+            "Bluetooth Microphone",
+        ] {
+            assert_eq!(mic_warmup_samples(name), MIC_BT_WARMUP_SAMPLES, "{name}");
+            assert!(looks_like_bluetooth(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn wired_and_builtin_mics_get_the_short_warmup() {
+        for name in ["Microphone (Realtek Audio)", "MacBook Pro Microphone", "USB Audio Device", ""] {
+            assert_eq!(mic_warmup_samples(name), MIC_WARMUP_SAMPLES, "{name}");
+            assert!(!looks_like_bluetooth(name), "{name}");
+        }
     }
 }
