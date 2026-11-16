@@ -1,0 +1,278 @@
+# Parla CI / release orchestrator
+#
+# Gate diagram (every job below is a hard gate — downstream only runs if upstream is green):
+#
+#   ┌──────────────┐
+#   │ gate-changes │  (detect app-build path changes; always continues)
+#   └──────┬───────┘
+#          │
+#          ├──────────────────┬────────────────────┐
+#          ▼                  ▼                    ▼
+#   ┌──────────────┐  ┌───────────────┐  ┌──────────────────┐
+#   │ gate-typechk │  │ gate-rust     │  │ gate-frontend    │
+#   │ (tsc)        │  │ (cargo test)  │  │ (vitest)         │
+#   └──────┬───────┘  └───────┬───────┘  └────────┬─────────┘
+#          │                  │                   │
+#          └────────────┬─────┴───────────────────┘
+#                       ▼
+#              ┌─────────────────┐
+#              │ gate-all-green  │  (joins the three test gates)
+#              └────────┬────────┘
+#                       │  only on push to main, build paths changed,
+#                       │  and commit is not a post-release bump
+#                       ▼
+#              ┌─────────────────┐
+#              │ release-build   │  build installer for CURRENT version
+#              │ + publish       │  create GitHub Release tag vX.Y.Z
+#              └────────┬────────┘
+#                       ▼
+#              ┌─────────────────┐
+#              │ post-bump       │  patch-bump repo (X.Y.Z → X.Y.Z+1) for next pull
+#              └────────┬────────┘
+#                       ▼
+#              ┌─────────────────┐
+#              │ prune-releases  │  keep latest 2 GitHub Releases only
+#              └─────────────────┘
+#
+# ```mermaid
+# flowchart TD
+#   A[gate-changes] --> B[gate-typecheck]
+#   A --> C[gate-rust-tests]
+#   A --> D[gate-frontend-tests]
+#   B --> E[gate-all-green]
+#   C --> E
+#   D --> E
+#   E -->|main + build paths + not bump commit| F[release-build]
+#   F --> G[post-bump]
+#   G --> H[prune-releases keep 2]
+# ```
+
+name: CI / Release
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ── Gate 0: change detection ───────────────────────────────────────────────
+  gate-changes:
+    name: "Gate 0 · change detect"
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.filter.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            build:
+              - 'src/**'
+              - 'src-tauri/**'
+              - 'crates/**'
+              - 'resources/**'
+              - 'scripts/**'
+              - '.cargo/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'index.html'
+              - 'vite.config.ts'
+              - 'tsconfig.json'
+              - '.github/workflows/ci-release.yml'
+
+  # ── Gate 1: TypeScript ─────────────────────────────────────────────────────
+  gate-typecheck:
+    name: "Gate 1 · typecheck"
+    needs: gate-changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  # ── Gate 2: Rust unit tests ────────────────────────────────────────────────
+  gate-rust-tests:
+    name: "Gate 2 · rust tests"
+    needs: gate-changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - name: Run parla-core lib tests
+        run: cargo test -p parla-core --lib
+
+  # ── Gate 3: Frontend tests ─────────────────────────────────────────────────
+  gate-frontend-tests:
+    name: "Gate 3 · frontend tests"
+    needs: gate-changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # ── Join gate: all tests green ─────────────────────────────────────────────
+  gate-all-green:
+    name: "Gate ✓ · all tests green"
+    needs: [gate-changes, gate-typecheck, gate-rust-tests, gate-frontend-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All gates passed
+        run: |
+          echo "typecheck ✓  rust ✓  frontend ✓"
+          echo "build_paths_changed=${{ needs.gate-changes.outputs.build }}"
+
+  # ── Release: build CURRENT version installer (Windows) ─────────────────────
+  release-build:
+    name: "Release · build + publish"
+    needs: [gate-changes, gate-all-green]
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      needs.gate-changes.outputs.build == 'true' &&
+      !contains(github.event.head_commit.message, '[skip release]')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read current version
+        id: version
+        shell: pwsh
+        run: |
+          $raw = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $v = $raw.version
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag=v$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Releasing version $v (pre-bump)"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build Windows installer
+        run: .\scripts\build.ps1 -SkipTests
+
+      - name: Locate installer
+        id: artifact
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem release -Filter '*-setup.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $exe) { throw 'No installer found in release/' }
+          "path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "name=$($exe.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Installer: $($exe.FullName)"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          $ver = '${{ steps.version.outputs.version }}'
+          $file = '${{ steps.artifact.outputs.path }}'
+          $existing = gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists — uploading asset (clobber)"
+            gh release upload $tag $file --clobber
+          } else {
+            gh release create $tag $file `
+              --title "Parla $ver" `
+              --notes "Automated Windows installer for Parla $ver.`n`nBuilt from commit ${{ github.sha }}."
+          }
+
+  # ── Post-release: bump repo version for the next pull ──────────────────────
+  post-bump:
+    name: "Post · bump version for next pull"
+    needs: release-build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref_name }}
+
+      - name: Patch-bump version files
+        id: bump
+        shell: pwsh
+        run: .\scripts\bump-version.ps1
+
+      - name: Commit and push bump
+        shell: pwsh
+        env:
+          NEXT: ${{ steps.bump.outputs.next }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml package.json src-tauri/tauri.conf.json
+          git commit -m "chore: bump version to $env:NEXT [skip release]"
+          git push
+
+  # ── Prune: retain only the latest 2 releases ───────────────────────────────
+  prune-releases:
+    name: "Post · prune old releases (keep 2)"
+    needs: release-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete releases beyond the latest two
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # List releases newest-first; drop the first two; delete the rest (+ tags).
+          mapfile -t OLD < <(gh release list --repo "${{ github.repository }}" --limit 100 \
+            --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[2:][].tagName')
+          if [ "${#OLD[@]}" -eq 0 ]; then
+            echo "Nothing to prune (≤2 releases)."
+            exit 0
+          fi
+          for tag in "${OLD[@]}"; do
+            echo "Pruning release $tag"
+            gh release delete "$tag" --repo "${{ github.repository }}" --yes --cleanup-tag
+          done

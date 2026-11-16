@@ -1,0 +1,40 @@
+# Operator-only / local (never publish)
+_dev/
+.cursor/
+ref/
+release/
+
+# Build & dependencies
+target/
+node_modules/
+dist/
+src-tauri/gen/
+*.log
+
+# Tooling / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+secrets/
+
+# Test / coverage / caches
+coverage/
+.nyc_output/
+.vitest-cache/
+*.lcov
+
+# OS / Dropbox noise
+desktop.ini
+.dropbox
+.dropbox.attr

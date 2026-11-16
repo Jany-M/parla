@@ -1,0 +1,4 @@
+# Statically link the C runtime on Windows: matches the static (/MT) sherpa-onnx libraries
+# and means users never need the Visual C++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

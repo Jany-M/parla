@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "stt-parakeet-tdt-0.6b-v3-int8",
+      "slot": "stt",
+      "label": "Speech recognition \u2014 Parakeet TDT 0.6B v3 (int8)",
+      "description": "Transcribes 25 European languages, including Italian, English and French. Runs on the CPU.",
+      "license": "CC-BY-4.0 (NVIDIA)",
+      "platform": "any",
+      "files": [
+        {
+          "name": "encoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/encoder.int8.onnx",
+          "sha256": "1afbe69c1ffdabee94755f42e4daf1d93549131a3da11356bda84fcef0f2c479",
+          "size": 652282294
+        },
+        {
+          "name": "decoder.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/decoder.int8.onnx",
+          "sha256": "0222a86147299d4dee90edf95b6d13827edb42ad8b7c9cf0b2582f030937c0b5",
+          "size": 11845274
+        },
+        {
+          "name": "joiner.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/joiner.int8.onnx",
+          "sha256": "cbd02f3696e9944970111fb439d9c3fd365a80374565f13f2b9c7007d253fc98",
+          "size": 6355277
+        },
+        {
+          "name": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/tokens.txt",
+          "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
+          "size": 93939
+        }
+      ]
+    },
+    {
+      "id": "vad-silero",
+      "slot": "vad",
+      "label": "Voice activity \u2014 Silero VAD",
+      "description": "Finds where people are speaking.",
+      "license": "MIT",
+      "platform": "any",
+      "files": [
+        {
+          "name": "silero_vad.onnx",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+          "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+          "size": 643854
+        }
+      ]
+    },
+    {
+      "id": "spk-wespeaker-resnet34",
+      "slot": "speaker",
+      "label": "Speaker recognition \u2014 WeSpeaker ResNet34",
+      "description": "Tells voices apart so each person gets their own label.",
+      "license": "Apache-2.0",
+      "platform": "any",
+      "files": [
+        {
+          "name": "wespeaker_en_voxceleb_resnet34.onnx",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx",
+          "sha256": "5ef208a9da1453335308a6b6f4e6dfbd7e183a38b604de0a57664f45d257fe94",
+          "size": 26534365
+        }
+      ]
+    },
+    {
+      "id": "mt-hy-mt2-1.8b-q4km",
+      "slot": "translate",
+      "label": "Translation \u2014 Hy-MT2 1.8B (Q4_K_M)",
+      "description": "Live translation between 33 languages. Loaded only while translation is on.",
+      "license": "Apache-2.0 (Tencent)",
+      "platform": "any",
+      "files": [
+        {
+          "name": "Hy-MT2-1.8B-Q4_K_M.gguf",
+          "url": "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B-Q4_K_M.gguf",
+          "sha256": "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699",
+          "size": 1133080448
+        }
+      ]
+    },
+    {
+      "id": "sum-qwen3.5-2b-q4km",
+      "slot": "summarize",
+      "label": "Summaries \u2014 Qwen3.5 2B (Q4_K_M)",
+      "description": "Compact model for 8 GB laptops.",
+      "license": "Apache-2.0 (Alibaba)",
+      "platform": "any",
+      "files": [
+        {
+          "name": "Qwen3.5-2B-Q4_K_M.gguf",
+          "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",
+          "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+          "size": 1280835840
+        }
+      ]
+    },
+    {
+      "id": "sum-qwen3.5-4b-q4km",
+      "slot": "summarize",
+      "label": "Summaries \u2014 Qwen3.5 4B (Q4_K_M)",
+      "description": "Better notes on laptops with 16 GB or more.",
+      "license": "Apache-2.0 (Alibaba)",
+      "platform": "any",
+      "files": [
+        {
+          "name": "Qwen3.5-4B-Q4_K_M.gguf",
+          "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
+          "sha256": "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+          "size": 2740937888
+        }
+      ]
+    },
+    {
+      "id": "rt-llama-cpp-windows",
+      "slot": "runtime",
+      "label": "Language-model runtime \u2014 llama.cpp b12438",
+      "description": "Runs the translation and summary models on your CPU.",
+      "license": "MIT",
+      "platform": "windows",
+      "files": [
+        {
+          "name": "llama-b12438-bin-win-cpu-x64.zip",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12438/llama-b12438-bin-win-cpu-x64.zip",
+          "sha256": "ac5ca5a91320c1ad0d4b8db71c3f3dd67c436de2c3d17528225bbb18364f79d1",
+          "size": 25219484,
+          "extract": true
+        }
+      ]
+    }
+  ]
+}
