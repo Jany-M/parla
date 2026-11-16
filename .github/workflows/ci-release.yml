@@ -6,17 +6,20 @@
 #   │ gate-changes │  (detect app-build path changes; always continues)
 #   └──────┬───────┘
 #          │
-#          ├──────────────────┬────────────────────┐
-#          ▼                  ▼                    ▼
-#   ┌──────────────┐  ┌───────────────┐  ┌──────────────────┐
-#   │ gate-typechk │  │ gate-rust     │  │ gate-frontend    │
-#   │ (tsc)        │  │ (cargo test)  │  │ (vitest)         │
-#   └──────┬───────┘  └───────┬───────┘  └────────┬─────────┘
-#          │                  │                   │
-#          └────────────┬─────┴───────────────────┘
-#                       ▼
-#              ┌─────────────────┐
-#              │ gate-all-green  │  (joins the three test gates)
+#          │  if build paths changed ─────────────────────────────┐
+#          │                                                      │
+#          ├──────────────────┬────────────────────┐              │
+#          ▼                  ▼                    ▼              │
+#   ┌──────────────┐  ┌───────────────┐  ┌──────────────────┐     │
+#   │ gate-typechk │  │ gate-rust     │  │ gate-frontend    │     │
+#   │ (tsc)        │  │ (cargo test)  │  │ (vitest)         │     │
+#   └──────┬───────┘  └───────┬───────┘  └────────┬─────────┘     │
+#          │                  │                   │              │
+#          └────────────┬─────┴───────────────────┘              │
+#                       ▼                                        │
+#              ┌─────────────────┐  meta-only changes (FUNDING,  │
+#              │ gate-all-green  │◄─ README, LICENSE, …): skip   │
+#              │                 │   tests and still succeed     ◄┘
 #              └────────┬────────┘
 #                       │  only on push to main, build paths changed,
 #                       │  and commit is not a post-release bump
@@ -36,10 +39,11 @@
 #
 # ```mermaid
 # flowchart TD
-#   A[gate-changes] --> B[gate-typecheck]
-#   A --> C[gate-rust-tests]
-#   A --> D[gate-frontend-tests]
-#   B --> E[gate-all-green]
+#   A[gate-changes] -->|build paths| B[gate-typecheck]
+#   A -->|build paths| C[gate-rust-tests]
+#   A -->|build paths| D[gate-frontend-tests]
+#   A --> E[gate-all-green]
+#   B --> E
 #   C --> E
 #   D --> E
 #   E -->|main + build paths + not bump commit| F[release-build]
@@ -99,6 +103,7 @@ jobs:
   gate-typecheck:
     name: "Gate 1 · typecheck"
     needs: gate-changes
+    if: needs.gate-changes.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -113,6 +118,7 @@ jobs:
   gate-rust-tests:
     name: "Gate 2 · rust tests"
     needs: gate-changes
+    if: needs.gate-changes.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -127,6 +133,7 @@ jobs:
   gate-frontend-tests:
     name: "Gate 3 · frontend tests"
     needs: gate-changes
+    if: needs.gate-changes.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -137,16 +144,33 @@ jobs:
       - run: npm ci
       - run: npm test
 
-  # ── Join gate: all tests green ─────────────────────────────────────────────
+  # ── Join gate: all tests green (or skipped for meta-only changes) ──────────
   gate-all-green:
     name: "Gate ✓ · all tests green"
     needs: [gate-changes, gate-typecheck, gate-rust-tests, gate-frontend-tests]
+    # Skipped test jobs would otherwise skip this join; always() + explicit checks.
+    if: always() && needs.gate-changes.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: All gates passed
         run: |
+          build='${{ needs.gate-changes.outputs.build }}'
+          echo "build_paths_changed=$build"
+          if [ "$build" != "true" ]; then
+            echo "No app/build paths changed (e.g. FUNDING.yml, README, LICENSE) — tests skipped."
+            exit 0
+          fi
+          for result in \
+            '${{ needs.gate-typecheck.result }}' \
+            '${{ needs.gate-rust-tests.result }}' \
+            '${{ needs.gate-frontend-tests.result }}'
+          do
+            if [ "$result" != "success" ]; then
+              echo "A test gate did not succeed (got: $result)"
+              exit 1
+            fi
+          done
           echo "typecheck ✓  rust ✓  frontend ✓"
-          echo "build_paths_changed=${{ needs.gate-changes.outputs.build }}"
 
   # ── Release: build CURRENT version installer (Windows) ─────────────────────
   release-build:
