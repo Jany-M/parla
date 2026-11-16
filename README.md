@@ -1,7 +1,8 @@
 # Parla
 
-Local-only meeting notes for Windows: records your meetings (any app), transcribes verbatim, labels speakers, translates other people live in a floating overlay, and summarizes on demand.
-No accounts, no subscriptions, no cloud, free forever; models run on your machine.
+Local-only meeting notes for Windows: records yourself or your meetings (any app), transcribes verbatim, labels speakers and translates them live in a floating overlay, then summarizes on demand.
+
+Local AI/LLMs only (max privacy), no accounts, no subscriptions, no cloud, free forever.
 
 ## Support this Project if you like it
 
