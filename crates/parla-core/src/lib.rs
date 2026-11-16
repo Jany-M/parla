@@ -24,6 +24,7 @@ pub mod store;
 pub mod summary;
 pub mod translate;
 pub mod types;
+pub mod update;
 
 #[cfg(test)]
 pub(crate) mod testutil;

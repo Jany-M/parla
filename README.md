@@ -1,32 +1,39 @@
-# Parla
+# ![Parla](src-tauri/icons/32x32.png) Parla
 
-Local-only meeting notes for Windows: records yourself or your meetings (any app), transcribes verbatim, labels speakers and translates them live in a floating overlay, then summarizes on demand.
+[![Version](https://img.shields.io/github/v/release/Jany-M/parla?include_prereleases&sort=semver&label=version&style=flat-square)](https://github.com/Jany-M/parla/releases/latest)
 
-Local AI/LLMs only (max privacy), no accounts, no subscriptions, no cloud, free forever.
+Meeting notes for Windows: records yourself or your meetings (any app), transcribes verbatim, recognizes different speakers and can translate them live in a floating overlay, then summarizes on demand.
+
+Local AI/LLMs only (max privacy), no accounts, no subscriptions, no cloud, no high-end GPU required, free forever.
+
+*Parla is built to stay lightweight and run on laptops with modest hardware, not only high-end machines.*
+
+## Features
+
+* **Record & pause** in one continuous transcript (resume without starting a new meeting)
+* **Auto-saves** transcripts as you go, including any live translations
+* **Translate on demand** — turn the floating overlay on when you need it
+* **Summarize on demand** after a meeting (or skip it)
+* **Export to Markdown** (`.md`) for notes elsewhere
 
 ## Support this Project if you like it
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-shambix-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/shambix) or [![Sponsor this on GitHub](https://img.shields.io/github/sponsors/Jany-M?label=Sponsor&logo=githubsponsors&logoColor=white&color=EA4AAA)](https://github.com/sponsors/Jany-M)
 
-## Models
+## Requirements
 
-Downloaded on first use and run fully offline (see `resources/manifest.json`) for max privacy (nothing leaves your PC).
-
-| Role | Model | Notes |
+| | Minimum | Notes |
 |---|---|---|
-| Speech recognition (STT) | Parakeet TDT 0.6B v3 (int8) | 25 European languages incl. IT/EN/FR; CPU. CC-BY-4.0 (NVIDIA) |
-| Voice activity (VAD) | Silero VAD | Finds where people are speaking. MIT |
-| Speaker labels | WeSpeaker ResNet34 | Separates voices for per-person labels. Apache-2.0 |
-| Live translation | Hy-MT2 1.8B (Q4_K_M) | Loaded only while translation is on. Apache-2.0 (Tencent) |
-| Summaries (8 GB+) | Qwen3.5 2B (Q4_K_M) | Compact notes model. Apache-2.0 (Alibaba) |
-| Summaries (16 GB+) | Qwen3.5 4B (Q4_K_M) | Higher-quality notes when RAM allows. Apache-2.0 (Alibaba) |
-| LLM runtime | llama.cpp (Windows CPU build) | Serves translation and summary GGUFs locally. MIT |
+| OS | Windows 10/11 (x64) | WebView2 is already on most PCs |
+| RAM | **8 GB** | Uses the compact summary model; 16 GB+ can use the larger one |
+| Disk | ~3 GB | App is small (~10 MB installer); models download on first use (~3 GB for the 8 GB set, ~4.5 GB if you also keep the 4B summary) |
+| CPU | Any modern x64 with AVX2 | All default models run on CPU, no GPU required |
 
-You can also point translate/summarize slots at a local GGUF or an OpenAI-compatible endpoint (e.g. LM Studio, Ollama).
+The first-run wizard detects your RAM and only offers the summary model that fits. On machines under ~16 GB, the larger 4B summary model is not downloadable; on 16 GB+ you can switch between 2B and 4B in Settings.
 
 ## Install, data and uninstall
 
-Download and install the latest .exe from GitHub, or build it yourself (see step below).
+[Download](https://github.com/Jany-M/parla/releases) and install the latest .exe from GitHub, or build it yourself (see steps below).
 
 * Per-user install (no admin). Everything the app creates lives in `%LOCALAPPDATA%\Parla`
   (settings, meetings DB, downloaded models, llama.cpp runtime, logs, webview profile).
@@ -42,7 +49,7 @@ Download and install the latest .exe from GitHub, or build it yourself (see step
 .\scripts\build.ps1 -TestsOnly   # tests only
 ```
 
-Prerequisites are checked by the script (Rust MSVC, Node 20+, VS Build Tools C++ workload).
+Prerequisites are checked by the script (Rust MSVC, Node 22+, VS Build Tools C++ workload).
 
 ## Tests
 
@@ -54,14 +61,31 @@ Prerequisites are checked by the script (Rust MSVC, Node 20+, VS Build Tools C++
 
 `npm run dev` opens the UI in a browser against the mock backend.
 
+## Models
+
+Downloaded on first use and run fully offline (see `resources/manifest.json`) for max privacy (nothing leaves your PC).
+
+| Role | Model | Notes |
+|---|---|---|
+| Speech recognition (STT) | Parakeet TDT 0.6B v3 (int8) | 25 European languages incl. IT/EN/FR; CPU. CC-BY-4.0 (NVIDIA) |
+| Voice activity (VAD) | Silero VAD | Finds where people are speaking. MIT |
+| Speaker labels | WeSpeaker ResNet34 | Separates voices for per-person labels. Apache-2.0 |
+| Live translation | Hy-MT2 1.8B (Q4_K_M) | Loaded only while translation is on. Apache-2.0 (Tencent) |
+| Summaries (8 GB+) | Qwen3.5 2B (Q4_K_M) | Default on modest laptops. Apache-2.0 (Alibaba) |
+| Summaries (16 GB+) | Qwen3.5 4B (Q4_K_M) | Offered only when RAM allows; switchable in Settings. Apache-2.0 (Alibaba) |
+| LLM runtime | llama.cpp (Windows CPU build) | Serves translation and summary GGUFs locally. MIT |
+
+You can also point translate/summarize slots at a local GGUF or an OpenAI-compatible endpoint (e.g. LM Studio, Ollama).
+
 ## License
 
-[MIT](LICENSE): use, modify, and redistribute freely (including commercially), provided you keep the copyright notice and license text so the original author is credited.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+
+Use, modify, and redistribute freely (including commercially), provided you keep the copyright notice and license text so the original author is credited.
 
 ## Author
 
-Jany  Martelli
-
+Jany Martelli
 
 ## Need a custom web / mobile / cloud / AI app developed?
 

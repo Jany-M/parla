@@ -48,6 +48,8 @@ pub struct ModelStatus {
     pub label: String,
     pub description: String,
     pub license: String,
+    /// This machine has enough RAM (and passes other gates) to download/use this model.
+    pub eligible: bool,
     pub size_bytes: u64,
     pub installed: bool,
     /// Chosen for this machine (RAM tier) or always required.
@@ -99,6 +101,17 @@ fn find_file(dir: &Path, pred: &dyn Fn(&str) -> bool) -> Option<PathBuf> {
 
 impl Service {
     pub fn new(paths: AppPaths, manifest: Manifest, sink: Arc<dyn EventSink>, loader: EngineLoader, sources: SourceFactory) -> Result<Arc<Self>> {
+        Self::with_hardware(paths, manifest, sink, loader, sources, hardware::detect())
+    }
+
+    fn with_hardware(
+        paths: AppPaths,
+        manifest: Manifest,
+        sink: Arc<dyn EventSink>,
+        loader: EngineLoader,
+        sources: SourceFactory,
+        hw: hardware::HardwareInfo,
+    ) -> Result<Arc<Self>> {
         paths.ensure_dirs()?;
         let store = Store::open(&paths.db_path())?;
         store.close_dangling_meetings()?; // a crash/kill must not leave "recording…" meetings behind
@@ -113,7 +126,7 @@ impl Service {
             sources,
             rec: Arc::new(Mutex::new(None)),
             mt_server: Mutex::new(None),
-            hw: hardware::detect(),
+            hw,
         }))
     }
 
@@ -130,6 +143,9 @@ impl Service {
     pub fn update_settings(&self, s: Settings) -> Result<()> {
         for (choice, slot) in [(&s.slots.stt, Slot::Stt), (&s.slots.speaker, Slot::Speaker), (&s.slots.translate, Slot::Translate), (&s.slots.summarize, Slot::Summarize)] {
             crate::slots::validate_choice(choice, slot)?;
+            if let SlotChoice::Managed { item_id: Some(id) } = choice {
+                self.ensure_eligible(id)?;
+            }
         }
         languages::by_code(&s.target_lang).with_context(|| format!("unsupported language '{}'", s.target_lang))?;
         s.save(&self.paths.settings_path())?;
@@ -160,6 +176,7 @@ impl Service {
                 label: i.label.clone(),
                 description: i.description.clone(),
                 license: i.license.clone(),
+                eligible: hardware::can_use(&self.hw, &i.id),
                 size_bytes: i.total_bytes(),
                 installed: models::is_installed(&self.paths.models_dir(), &i.id),
                 recommended: want.contains(&i.id.as_str()) || i.slot == Slot::Runtime,
@@ -171,8 +188,21 @@ impl Service {
         self.manifest.get(id).ok_or_else(|| anyhow!("unknown model '{id}'"))
     }
 
+    fn ensure_eligible(&self, id: &str) -> Result<()> {
+        if hardware::can_use(&self.hw, id) {
+            return Ok(());
+        }
+        let need = hardware::min_ram_mb_for(id).unwrap_or(0);
+        bail!(
+            "This model needs about {} GB of RAM; this computer has about {} GB. Use the smaller summary model instead.",
+            (need + 500) / 1000,
+            (self.hw.total_ram_mb + 500) / 1000
+        )
+    }
+
     /// Blocking; call from a worker thread. Runtime items are pulled in automatically with an LLM.
     pub fn install_model(&self, id: &str, cancel: &Cancel, progress: &mut dyn FnMut(u64, u64)) -> Result<()> {
+        self.ensure_eligible(id)?;
         let item = self.item(id)?.clone();
         models::install_item(&self.paths.models_dir(), &item, cancel, progress)?;
         Ok(())
@@ -632,5 +662,32 @@ mod tests {
         svc.install_model(ids::STT, &Cancel::default(), &mut |_, _| {}).unwrap();
         svc.remove_all_models().unwrap();
         assert!(svc.model_status().iter().all(|m| !m.installed));
+    }
+
+    #[test]
+    fn install_rejects_the_4b_summary_on_low_ram() {
+        let t = tempfile::tempdir().unwrap();
+        let sink = Arc::new(VecSink::default());
+        let sources: SourceFactory = Arc::new(|_| Ok(vec![]));
+        let four = Item {
+            id: hardware::SUMMARIZE_4B.into(),
+            slot: Slot::Summarize,
+            label: "4B".into(),
+            platform: "any".into(),
+            license: "MIT".into(),
+            description: String::new(),
+            files: vec![FileSpec { name: "m.bin".into(), url: "http://127.0.0.1/x".into(), sha256: None, size: Some(1), extract: false }],
+        };
+        let two = Item { id: hardware::SUMMARIZE_2B.into(), ..four.clone() };
+        let manifest = Manifest { version: 1, items: vec![two, four] };
+        let hw = hardware::HardwareInfo { total_ram_mb: 8_000, cpu_threads: 8, has_avx2: true };
+        let svc = Service::with_hardware(AppPaths::new(t.path().join("Parla")), manifest, sink, texts(&[]), sources, hw).unwrap();
+        let st = svc.model_status();
+        assert!(!st.iter().find(|m| m.id == hardware::SUMMARIZE_4B).unwrap().eligible);
+        assert!(st.iter().find(|m| m.id == hardware::SUMMARIZE_2B).unwrap().eligible);
+        assert!(st.iter().find(|m| m.id == hardware::SUMMARIZE_2B).unwrap().recommended);
+        assert!(!st.iter().find(|m| m.id == hardware::SUMMARIZE_4B).unwrap().recommended);
+        let err = svc.install_model(hardware::SUMMARIZE_4B, &Cancel::default(), &mut |_, _| {}).unwrap_err().to_string();
+        assert!(err.contains("RAM"), "{err}");
     }
 }

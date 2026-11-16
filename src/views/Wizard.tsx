@@ -48,6 +48,8 @@ export function Wizard() {
   };
 
   const warn = info.system.recommendation.warning;
+  const ramGb = Math.round(info.system.hardware.total_ram_mb / 1024);
+  const summaryPick = featureItems(models, "summarize").find((m) => m.slot === "summarize");
 
   return (
     <div className="grid h-full place-items-center overflow-y-auto p-6">
@@ -56,6 +58,15 @@ export function Wizard() {
           <h1 className="text-2xl font-semibold">Welcome to Parla</h1>
           <p className="mt-1 text-mute">Meeting notes, speaker labels and live translation, all on this computer. Nothing is sent anywhere, and there are no accounts.</p>
         </div>
+        <Card title="This computer">
+          <p className="text-sm">About <strong>{ramGb} GB</strong> RAM · {info.system.hardware.cpu_threads} CPU threads{info.system.hardware.has_avx2 ? "" : " · no AVX2"}</p>
+          {summaryPick && (
+            <p className="mt-2 text-sm text-mute">
+              Recommended summaries model: <span className="text-ink">{summaryPick.label}</span>
+              {ramGb < 16 ? " (the larger 4B model needs about 16 GB RAM)." : " (you can switch to the smaller 2B model later in Settings)."}
+            </p>
+          )}
+        </Card>
         {warn && <Banner kind="warn">{warn}</Banner>}
         {error && <Banner onClose={() => setError(null)}>{error}</Banner>}
 
@@ -67,7 +78,7 @@ export function Wizard() {
               <span className="text-mute">{formatBytes(totalBytes(featureItems(models, "translate")))}</span>
             </li>
             <li className="flex items-start justify-between gap-3">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={wantSummary} onChange={(e) => setWantSummary(e.target.checked)} disabled={phase === "download"} /> Meeting summaries</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={wantSummary} onChange={(e) => setWantSummary(e.target.checked)} disabled={phase === "download"} /> Meeting summaries{summaryPick ? ` — ${summaryPick.label}` : ""}</label>
               <span className="text-mute">{formatBytes(totalBytes(featureItems(models, "summarize")))}</span>
             </li>
           </ul>

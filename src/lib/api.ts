@@ -1,5 +1,6 @@
 import type {
   AppInfo, Devices, Lang, MeetingDetail, MeetingListItem, ModelProgress, ModelStatus, ParlaEvent, Settings, SummaryProgress,
+  UpdateInfo, UpdateProgress,
 } from "./types";
 
 /** Everything the UI can ask the backend for. One implementation talks to Tauri, one is in-memory. */
@@ -19,6 +20,8 @@ export interface Api {
   recordingState(): Promise<number | null>;
   openLogs(): Promise<void>;
   logUiError(message: string): Promise<void>;
+  checkForUpdate(): Promise<UpdateInfo | null>;
+  installUpdate(): Promise<void>;
   setPaused(paused: boolean): Promise<boolean>;
   isPaused(): Promise<boolean>;
   startTranslation(target: string): Promise<void>;
@@ -40,6 +43,7 @@ export interface Api {
   onEvent(cb: (e: ParlaEvent) => void): Promise<() => void>;
   onModelProgress(cb: (p: ModelProgress) => void): Promise<() => void>;
   onSummaryProgress(cb: (p: SummaryProgress) => void): Promise<() => void>;
+  onUpdateProgress(cb: (p: UpdateProgress) => void): Promise<() => void>;
   pickAudioFile(): Promise<string | null>;
   pickSavePath(defaultName: string): Promise<string | null>;
   pickFolder(): Promise<string | null>;
@@ -68,6 +72,8 @@ async function realApi(): Promise<Api> {
     recordingState: () => invoke("recording_state"),
     openLogs: () => invoke("open_logs"),
     logUiError: (message) => invoke("log_ui_error", { message }),
+    checkForUpdate: () => invoke("check_for_update"),
+    installUpdate: () => invoke("install_update"),
     setPaused: (paused) => invoke("set_paused", { paused }),
     isPaused: () => invoke("is_paused"),
     startTranslation: (target) => invoke("start_translation", { target }),
@@ -89,6 +95,7 @@ async function realApi(): Promise<Api> {
     onEvent: on<ParlaEvent>("parla-event"),
     onModelProgress: on<ModelProgress>("model-progress"),
     onSummaryProgress: on<SummaryProgress>("summary-progress"),
+    onUpdateProgress: on<UpdateProgress>("update-progress"),
     pickAudioFile: async () => {
       const r = await dialog.open({
         multiple: false,

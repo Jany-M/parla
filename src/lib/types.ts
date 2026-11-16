@@ -36,6 +36,8 @@ export type ModelSlot = "stt" | "vad" | "speaker" | "translate" | "summarize" | 
 export interface ModelStatus {
   id: string; slot: ModelSlot; label: string; description: string; license: string;
   size_bytes: number; installed: boolean; recommended: boolean;
+  /** False when this machine lacks the RAM (or other gates) to download/use the model. */
+  eligible: boolean;
 }
 export interface ModelProgress { id: string; done: number; total: number }
 export interface SummaryProgress { meeting_id: number; done: number; total: number }
@@ -50,3 +52,12 @@ export interface SystemInfo {
   disk_usage_bytes: number; data_dir: string;
 }
 export interface AppInfo { version: string; system: SystemInfo }
+
+/** Newer GitHub Release available for this install (Windows installer). */
+export interface UpdateInfo {
+  version: string;
+  tag: string;
+  asset_name: string;
+  size: number;
+}
+export interface UpdateProgress { done: number; total: number }

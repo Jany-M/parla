@@ -1,5 +1,6 @@
 //! Thin command layer: every command forwards to `parla_core::service::Service`.
 use crate::state::AppState;
+use anyhow::Context;
 use parla_core::audio::device::{list_inputs, list_outputs, DeviceInfo};
 use parla_core::models::Cancel;
 use parla_core::service::{ModelStatus, SystemInfo};
@@ -293,4 +294,111 @@ pub fn show_overlay(app: AppHandle, show: bool) {
     if let Some(w) = app.get_webview_window("overlay") {
         let _ = if show { w.show() } else { w.hide() };
     }
+}
+
+// ---- updates (GitHub Releases) --------------------------------------------
+
+#[derive(Serialize, Clone)]
+pub struct UpdateInfoDto {
+    pub version: String,
+    pub tag: String,
+    pub asset_name: String,
+    pub size: u64,
+}
+
+#[derive(Serialize, Clone)]
+struct UpdateProgress {
+    done: u64,
+    total: u64,
+}
+
+/// Compares the running version to https://github.com/Jany-M/parla/releases/latest.
+#[tauri::command]
+pub async fn check_for_update(app: AppHandle) -> Res<Option<UpdateInfoDto>> {
+    let current = app.package_info().version.to_string();
+    blocking(move || {
+        Ok(parla_core::update::check_latest(&current)?.map(|u| UpdateInfoDto {
+            version: u.version,
+            tag: u.tag,
+            asset_name: u.asset_name,
+            size: u.size,
+        }))
+    })
+    .await
+}
+
+/// Download the latest Windows installer, stop Parla services, run a silent install, restart.
+#[tauri::command]
+pub async fn install_update(app: AppHandle, s: State<'_, AppState>) -> Res<()> {
+    #[cfg(not(windows))]
+    {
+        let _ = (app, s);
+        return Err("Automatic updates are only available on Windows".into());
+    }
+    #[cfg(windows)]
+    {
+        let current = app.package_info().version.to_string();
+        let svc = s.svc.clone();
+        s.install_cancel.lock().unwrap().cancel();
+        s.import_cancel.lock().unwrap().store(true, Ordering::SeqCst);
+
+        let app_for_progress = app.clone();
+        let installer = blocking(move || {
+            let info = parla_core::update::check_latest(&current)?
+                .ok_or_else(|| anyhow::anyhow!("no newer release is available"))?;
+            let dir = std::env::temp_dir().join("parla-update");
+            parla_core::update::download_installer(&info, &dir, &mut |done, total| {
+                let _ = app_for_progress.emit("update-progress", UpdateProgress { done, total });
+            })
+        })
+        .await?;
+
+        // Stop recording / translation and any leftover llama-server before files are replaced.
+        let _ = svc.stop_live();
+        parla_core::llm::kill_stale(&svc.paths.models_dir());
+
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        spawn_windows_updater(installer, exe).map_err(err)?;
+        log::info!("update installer launched; exiting so files can be replaced");
+        app.exit(0);
+        Ok(())
+    }
+}
+
+/// Wait for this process to exit, run the NSIS installer silently (`/S`), then relaunch Parla.
+#[cfg(windows)]
+fn spawn_windows_updater(installer: PathBuf, app_exe: PathBuf) -> anyhow::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    let pid = std::process::id();
+    let script = std::env::temp_dir().join(format!("parla-apply-update-{pid}.cmd"));
+    // NSIS `/S` = silent; data under %LOCALAPPDATA%\Parla is kept on update (hooks.nsh).
+    let body = format!(
+        "@echo off\r\n\
+         setlocal\r\n\
+         set \"PID={pid}\"\r\n\
+         set \"SETUP={setup}\"\r\n\
+         set \"APP={app}\"\r\n\
+         :wait\r\n\
+         tasklist /FI \"PID eq %PID%\" | find \"%PID%\" >nul\r\n\
+         if not errorlevel 1 (\r\n\
+           timeout /t 1 /nobreak >nul\r\n\
+           goto wait\r\n\
+         )\r\n\
+         timeout /t 1 /nobreak >nul\r\n\
+         \"%SETUP%\" /S\r\n\
+         if exist \"%APP%\" start \"\" \"%APP%\"\r\n\
+         del \"%~f0\" >nul 2>&1\r\n",
+        setup = installer.display(),
+        app = app_exe.display(),
+    );
+    std::fs::write(&script, body)?;
+    std::process::Command::new("cmd")
+        .args(["/C", &script.to_string_lossy()])
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        .spawn()
+        .context("starting update helper")?;
+    Ok(())
 }

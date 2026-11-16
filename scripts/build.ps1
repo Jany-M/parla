@@ -22,6 +22,7 @@ Build output lives in %LOCALAPPDATA%\parla-build (outside Dropbox, so syncing do
 param(
   [switch]$SkipTests,
   [switch]$TestsOnly,
+  [switch]$SkipNpm,
   [switch]$Clean
 )
 
@@ -62,11 +63,15 @@ if (-not $env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR = Join-Path $env:LOCALAP
 if ($Clean -and (Test-Path $env:CARGO_TARGET_DIR)) { Step 'Cleaning'; Remove-Item -Recurse -Force $env:CARGO_TARGET_DIR }
 if ($Clean -and (Test-Path "$root\dist")) { Remove-Item -Recurse -Force "$root\dist" }
 
-Step 'Installing JavaScript dependencies'
-# node_modules lives inside the project; Dropbox ignores it if you mark it (Dropbox > Selective sync / `Set-Content -Stream com.dropbox.ignored`)
-& npm ci
-if ($LASTEXITCODE -ne 0) { Write-Host 'Lock file out of sync, using npm install instead.' -ForegroundColor Yellow; Run npm @('install') }
-try { Set-Content -Path "$root\node_modules" -Stream com.dropbox.ignored -Value 1 -ErrorAction Stop } catch {}
+if ($SkipNpm -and (Test-Path (Join-Path $root 'node_modules'))) {
+  Step 'Skipping npm install (node_modules already present)'
+} else {
+  Step 'Installing JavaScript dependencies'
+  # node_modules lives inside the project; Dropbox ignores it if you mark it (Dropbox > Selective sync / `Set-Content -Stream com.dropbox.ignored`)
+  & npm ci
+  if ($LASTEXITCODE -ne 0) { Write-Host 'Lock file out of sync, using npm install instead.' -ForegroundColor Yellow; Run npm @('install') }
+  try { Set-Content -Path "$root\node_modules" -Stream com.dropbox.ignored -Value 1 -ErrorAction Stop } catch {}
+}
 
 if (-not $SkipTests) {
   Step 'Rust tests (parla-core)'

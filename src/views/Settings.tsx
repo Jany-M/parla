@@ -3,7 +3,7 @@ import { Banner, Button, Card, ProgressBar, Select, Toggle } from "../components
 import { useApp } from "../context";
 import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
-import { isLocalUrl, SLOT_SOURCES, type SourceKind } from "../lib/models";
+import { eligibleForSlot, isLocalUrl, SLOT_SOURCES, type SourceKind } from "../lib/models";
 import type { Devices, ModelProgress, Settings as S, SlotChoice } from "../lib/types";
 
 type SlotKey = keyof S["slots"];
@@ -69,11 +69,20 @@ export function Settings() {
       {error && <Banner onClose={() => setError(null)}>{error}</Banner>}
 
       <Card title="Models on this computer">
+        <p className="mb-3 text-sm text-mute">
+          Detected about {Math.round(info.system.hardware.total_ram_mb / 1024)} GB RAM.
+          {info.system.recommendation.tier === "low"
+            ? " The larger summary model is hidden until you have about 16 GB."
+            : " You can download either summary model and pick which one to use below."}
+        </p>
         <ul className="divide-y divide-line">
-          {models.map((m) => (
+          {models.filter((m) => m.eligible || m.installed).map((m) => (
             <li key={m.id} className="flex items-center justify-between gap-4 py-3">
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{m.label}</div>
+                <div className="truncate text-sm font-medium">
+                  {m.label}
+                  {m.recommended ? <span className="ml-2 text-xs font-normal text-mute">recommended</span> : null}
+                </div>
                 <div className="text-xs text-mute">{formatBytes(m.size_bytes)} · {m.license}{m.installed ? " · installed" : ""}</div>
                 {busyId === m.id && progress?.id === m.id && <div className="mt-2 w-64"><ProgressBar value={progress.total ? progress.done / progress.total : 0} label={`Downloading ${m.label}`} /></div>}
               </div>
@@ -81,8 +90,10 @@ export function Settings() {
                 <Button variant="ghost" onClick={() => guard(async () => { await api().uninstallModel(m.id); await refreshModels(); await refreshInfo(); })}>Remove</Button>
               ) : busyId === m.id ? (
                 <Button variant="ghost" onClick={() => api().cancelInstall()}>Cancel</Button>
-              ) : (
+              ) : m.eligible ? (
                 <Button onClick={() => install(m.id)} disabled={busyId !== null}>Download</Button>
+              ) : (
+                <span className="shrink-0 text-xs text-mute">Needs more RAM</span>
               )}
             </li>
           ))}
@@ -102,6 +113,23 @@ export function Settings() {
                     {SLOT_SOURCES[k].map((s) => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}
                   </Select>
                 </div>
+                {c.kind === "managed" && k === "summarize" && (
+                  <div className="space-y-1">
+                    <label htmlFor="sum-model" className="sr-only">Summaries model</label>
+                    <Select
+                      id="sum-model"
+                      aria-label="Summaries model"
+                      value={c.item_id ?? ""}
+                      onChange={(e) => void setSlot(k, { kind: "managed", item_id: e.target.value || null })}
+                    >
+                      <option value="">Recommended for this computer ({info.system.recommendation.summarize_item})</option>
+                      {eligibleForSlot(models, "summarize").map((m) => (
+                        <option key={m.id} value={m.id}>{m.label}{m.recommended ? " · recommended" : ""}{m.installed ? "" : " · not downloaded"}</option>
+                      ))}
+                    </Select>
+                    <p className="text-xs text-mute">Only models your RAM can run are listed. Download them above first if needed.</p>
+                  </div>
+                )}
                 {c.kind === "local_file" && (
                   <div className="space-y-1">
                     <div className="flex gap-2">

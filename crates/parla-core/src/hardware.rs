@@ -20,6 +20,10 @@ pub struct Recommendation {
 }
 
 pub const MIN_SUPPORTED_RAM_MB: u64 = 7_000; // "8 GB" machines report ~7.4–7.9 GB usable
+/// Threshold for the larger summary model (16 GB machines often report ~14–15 GB usable).
+pub const HIGH_RAM_MB: u64 = 14_000;
+pub const SUMMARIZE_2B: &str = "sum-qwen3.5-2b-q4km";
+pub const SUMMARIZE_4B: &str = "sum-qwen3.5-4b-q4km";
 
 pub fn detect() -> HardwareInfo {
     let mut sys = sysinfo::System::new();
@@ -42,12 +46,25 @@ pub fn cpu_has_avx2() -> bool {
     }
 }
 
+/// Minimum RAM (MB) required to download/use this managed model. `None` = no extra gate.
+pub fn min_ram_mb_for(item_id: &str) -> Option<u64> {
+    match item_id {
+        SUMMARIZE_4B => Some(HIGH_RAM_MB),
+        _ => None,
+    }
+}
+
+/// Whether this machine may download and run the managed item.
+pub fn can_use(hw: &HardwareInfo, item_id: &str) -> bool {
+    min_ram_mb_for(item_id).map(|need| hw.total_ram_mb >= need).unwrap_or(true)
+}
+
 pub fn recommend(hw: &HardwareInfo) -> Recommendation {
     let threads = hw.cpu_threads.saturating_sub(1).clamp(1, 8);
-    let (tier, summarize_item) = if hw.total_ram_mb >= 14_000 {
-        ("high", "sum-qwen3.5-4b-q4km")
+    let (tier, summarize_item) = if hw.total_ram_mb >= HIGH_RAM_MB {
+        ("high", SUMMARIZE_4B)
     } else {
-        ("low", "sum-qwen3.5-2b-q4km")
+        ("low", SUMMARIZE_2B)
     };
     let warning = if !hw.has_avx2 {
         Some("This CPU lacks AVX2; the bundled AI runtime will not start.".to_string())
@@ -71,14 +88,29 @@ mod tests {
     fn eight_gb_gets_the_small_summary_model_and_no_warning() {
         let r = recommend(&hw(7_800, 8, true));
         assert_eq!(r.tier, "low");
-        assert_eq!(r.summarize_item, "sum-qwen3.5-2b-q4km");
+        assert_eq!(r.summarize_item, SUMMARIZE_2B);
         assert!(r.warning.is_none());
         assert_eq!(r.threads, 7);
     }
 
     #[test]
     fn sixteen_gb_gets_the_4b_model() {
-        assert_eq!(recommend(&hw(15_900, 16, true)).summarize_item, "sum-qwen3.5-4b-q4km");
+        assert_eq!(recommend(&hw(15_900, 16, true)).summarize_item, SUMMARIZE_4B);
+    }
+
+    #[test]
+    fn four_b_summary_is_blocked_below_high_ram() {
+        assert!(!can_use(&hw(8_000, 8, true), SUMMARIZE_4B));
+        assert!(can_use(&hw(14_000, 8, true), SUMMARIZE_4B));
+        assert!(can_use(&hw(8_000, 8, true), SUMMARIZE_2B));
+        assert!(can_use(&hw(8_000, 8, true), "mt-hy-mt2-1.8b-q4km"));
+    }
+
+    #[test]
+    fn high_ram_may_use_either_summary_model() {
+        let h = hw(16_000, 8, true);
+        assert!(can_use(&h, SUMMARIZE_2B) && can_use(&h, SUMMARIZE_4B));
+        assert_eq!(recommend(&h).summarize_item, SUMMARIZE_4B);
     }
 
     #[test]

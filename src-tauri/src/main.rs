@@ -184,6 +184,8 @@ fn main() {
             commands::export_markdown,
             commands::save_text,
             commands::show_overlay,
+            commands::check_for_update,
+            commands::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build Parla")

@@ -1,5 +1,5 @@
 import type { Api } from "./api";
-import type { MeetingDetail, ModelProgress, ModelStatus, ParlaEvent, Segment, Settings, SummaryProgress } from "./types";
+import type { MeetingDetail, ModelProgress, ModelStatus, ParlaEvent, Segment, Settings, SummaryProgress, UpdateInfo, UpdateProgress } from "./types";
 
 export const defaultSettings = (): Settings => ({
   slots: {
@@ -10,19 +10,38 @@ export const defaultSettings = (): Settings => ({
   overlay_font_px: 22, overlay_opacity: 0.85, summary_lang: "en",
 });
 
-const model = (id: string, slot: ModelStatus["slot"], label: string, mb: number, installed = false): ModelStatus => ({
-  id, slot, label, description: `${label} (demo)`, license: "Apache-2.0", size_bytes: mb * 1_000_000, installed, recommended: true,
+const model = (
+  id: string,
+  slot: ModelStatus["slot"],
+  label: string,
+  mb: number,
+  installed = false,
+  opts: { recommended?: boolean; eligible?: boolean } = {},
+): ModelStatus => ({
+  id,
+  slot,
+  label,
+  description: `${label} (demo)`,
+  license: "Apache-2.0",
+  size_bytes: mb * 1_000_000,
+  installed,
+  recommended: opts.recommended ?? true,
+  eligible: opts.eligible ?? true,
 });
 
 /** In-memory backend: powers `npm run dev` in a browser and every UI test. */
-export function createMockApi(opts: { installed?: boolean } = {}) {
+export function createMockApi(opts: { installed?: boolean; ramMb?: number; update?: UpdateInfo | null } = {}) {
+  const ramMb = opts.ramMb ?? 8000;
+  const highRam = ramMb >= 14000;
+  const update: UpdateInfo | null = opts.update === undefined ? null : opts.update;
   let settings = defaultSettings();
   let models: ModelStatus[] = [
     model("stt-parakeet", "stt", "Speech recognition", 660, opts.installed),
     model("vad-silero", "vad", "Voice activity", 1, opts.installed),
     model("spk-wespeaker", "speaker", "Speaker recognition", 27, opts.installed),
     model("mt-hy-mt2", "translate", "Translation", 1130, opts.installed),
-    model("sum-qwen-2b", "summarize", "Summaries", 1280, opts.installed),
+    model("sum-qwen-2b", "summarize", "Summaries — Qwen3.5 2B", 1280, opts.installed, { recommended: !highRam, eligible: true }),
+    model("sum-qwen-4b", "summarize", "Summaries — Qwen3.5 4B", 2614, opts.installed, { recommended: highRam, eligible: highRam }),
     model("rt-llama", "runtime", "Language-model runtime", 25, opts.installed),
   ];
   let meetings: MeetingDetail[] = [];
@@ -32,6 +51,7 @@ export function createMockApi(opts: { installed?: boolean } = {}) {
   const listeners = new Set<(e: ParlaEvent) => void>();
   const progress = new Set<(p: ModelProgress) => void>();
   const sprogress = new Set<(p: SummaryProgress) => void>();
+  const uprogress = new Set<(p: UpdateProgress) => void>();
   let nextId = 1;
   const calls: string[] = [];
   const track = <T,>(name: string, v: T): Promise<T> => (calls.push(name), Promise.resolve(v));
@@ -45,7 +65,21 @@ export function createMockApi(opts: { installed?: boolean } = {}) {
       api.emit({ type: "segment", segment: seg });
       return seg;
     },
-    appInfo: () => track("appInfo", { version: "0.1.0", system: { hardware: { total_ram_mb: 8000, cpu_threads: 8, has_avx2: true }, recommendation: { tier: "8gb", summarize_item: "sum-qwen-2b", translate_item: "mt-hy-mt2", threads: 4, warning: null }, disk_usage_bytes: 0, data_dir: "C:\\Users\\you\\AppData\\Local\\Parla" } }),
+    appInfo: () => track("appInfo", {
+      version: "0.1.0",
+      system: {
+        hardware: { total_ram_mb: ramMb, cpu_threads: 8, has_avx2: true },
+        recommendation: {
+          tier: highRam ? "high" : "low",
+          summarize_item: highRam ? "sum-qwen-4b" : "sum-qwen-2b",
+          translate_item: "mt-hy-mt2",
+          threads: 4,
+          warning: null,
+        },
+        disk_usage_bytes: 0,
+        data_dir: "C:\\Users\\you\\AppData\\Local\\Parla",
+      },
+    }),
     getSettings: () => track("getSettings", structuredClone(settings)),
     saveSettings: (s) => ((settings = structuredClone(s)), track("saveSettings", undefined)),
     listDevices: () => track("listDevices", { inputs: [{ id: "mic1", name: "Built-in microphone", is_default: true }], outputs: [{ id: "spk1", name: "Speakers", is_default: true }] }),
@@ -54,6 +88,7 @@ export function createMockApi(opts: { installed?: boolean } = {}) {
     installModel: async (id) => {
       calls.push(`install:${id}`);
       const m = models.find((x) => x.id === id)!;
+      if (!m.eligible) throw new Error("This model needs about 16 GB of RAM");
       progress.forEach((p) => p({ id, done: m.size_bytes / 2, total: m.size_bytes }));
       progress.forEach((p) => p({ id, done: m.size_bytes, total: m.size_bytes }));
       m.installed = true;
@@ -85,6 +120,12 @@ export function createMockApi(opts: { installed?: boolean } = {}) {
     recordingState: () => track("recordingState", recording),
     openLogs: () => track("openLogs", undefined),
     logUiError: (m) => track(`logUiError:${m}`, undefined),
+    checkForUpdate: () => track("checkForUpdate", update),
+    installUpdate: async () => {
+      calls.push("installUpdate");
+      uprogress.forEach((p) => p({ done: 1, total: 2 }));
+      uprogress.forEach((p) => p({ done: 2, total: 2 }));
+    },
     setPaused: (p) => { paused = p; return track(`setPaused:${p}`, recording !== null); },
     isPaused: () => track("isPaused", paused),
     startTranslation: async (t) => (calls.push(`startTranslation:${t}`), void (target = t)),
@@ -117,6 +158,7 @@ export function createMockApi(opts: { installed?: boolean } = {}) {
     onEvent: sub(listeners),
     onModelProgress: sub(progress),
     onSummaryProgress: sub(sprogress),
+    onUpdateProgress: sub(uprogress),
     pickAudioFile: () => track("pickAudioFile", "C:\\audio\\call.wav"),
     pickSavePath: (n) => track("pickSavePath", `C:\\out\\${n}`),
     pickFolder: () => track("pickFolder", "C:\\models\\mine"),

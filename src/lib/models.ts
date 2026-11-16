@@ -5,9 +5,14 @@ export type Feature = "translate" | "summarize";
 /** What the app cannot work without: speech, voice activity, speaker recognition. */
 export const essentials = (m: ModelStatus[]) => m.filter((x) => ["stt", "vad", "speaker"].includes(x.slot) && x.recommended);
 
-/** Models for an optional feature: its model for this machine, plus the shared runtime. */
+/** Models for an optional feature: its recommended model for this machine, plus the shared runtime. */
 export function featureItems(m: ModelStatus[], f: Feature): ModelStatus[] {
-  return m.filter((x) => (x.slot === f && x.recommended) || x.slot === "runtime");
+  return m.filter((x) => (x.slot === f && x.recommended && x.eligible) || x.slot === "runtime");
+}
+
+/** Eligible managed options for a slot (e.g. both summary sizes on 16 GB+). */
+export function eligibleForSlot(m: ModelStatus[], slot: ModelStatus["slot"]): ModelStatus[] {
+  return m.filter((x) => x.slot === slot && x.eligible);
 }
 
 export const missing = (items: ModelStatus[]) => items.filter((x) => !x.installed);

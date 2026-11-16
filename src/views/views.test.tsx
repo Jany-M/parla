@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -22,14 +22,26 @@ async function ready(onboarded = true) {
   render(<App />);
 }
 
+async function openSettings() {
+  const nav = await screen.findByRole("navigation", { name: /main/i });
+  await userEvent.click(within(nav).getByRole("button", { name: /settings/i }));
+  await screen.findByRole("heading", { name: /^settings$/i });
+}
+
 describe("wizard", () => {
   it("downloads missing models and then shows the app", async () => {
     mock = createMockApi({ installed: false });
     setApi(mock);
     await ready(false);
+    expect(await screen.findByRole("heading", { name: /this computer/i })).toBeInTheDocument();
+    expect(screen.getByText((t) => /8\s*gb/i.test(t))).toBeInTheDocument();
+    expect(screen.getAllByText(/qwen3\.5 2b/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/qwen3\.5 4b/i)).not.toBeInTheDocument();
     await userEvent.click(await screen.findByRole("button", { name: /download and continue/i }));
     await screen.findByRole("button", { name: /start recording/i });
     expect(mock.calls.filter((c) => c.startsWith("install:")).length).toBeGreaterThanOrEqual(4);
+    expect(mock.calls).toContain("install:sum-qwen-2b");
+    expect(mock.calls).not.toContain("install:sum-qwen-4b");
   });
   it("can skip optional features", async () => {
     mock = createMockApi({ installed: false });
@@ -41,6 +53,13 @@ describe("wizard", () => {
     await screen.findByRole("button", { name: /start recording/i });
     expect(mock.calls).not.toContain("install:mt-hy-mt2");
     expect(mock.calls).not.toContain("install:sum-qwen-2b");
+  });
+  it("recommends the 4B summary model on high-RAM machines", async () => {
+    mock = createMockApi({ installed: false, ramMb: 16000 });
+    setApi(mock);
+    await ready(false);
+    expect(await screen.findByText((t) => /16\s*gb/i.test(t))).toBeInTheDocument();
+    expect(screen.getAllByText(/qwen3\.5 4b/i).length).toBeGreaterThan(0);
   });
 });
 
@@ -112,10 +131,31 @@ describe("logs", () => {
   });
 });
 
+describe("updates", () => {
+  it("shows an update button above Open logs and installs on click", async () => {
+    mock = createMockApi({
+      installed: true,
+      update: { version: "0.2.0", tag: "v0.2.0", asset_name: "Parla_0.2.0_x64-setup.exe", size: 1_000_000 },
+    });
+    setApi(mock);
+    await ready();
+    const btn = await screen.findByRole("button", { name: /update to v0\.2\.0/i });
+    const logs = screen.getByRole("button", { name: /open logs/i });
+    expect(btn.compareDocumentPosition(logs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.click(btn);
+    await waitFor(() => expect(mock.calls).toContain("installUpdate"));
+  });
+
+  it("hides the update button when already current", async () => {
+    await ready();
+    expect(screen.queryByRole("button", { name: /update to/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("settings", () => {
   it("warns when an endpoint is not local", async () => {
     await ready();
-    await userEvent.click(await screen.findByRole("button", { name: /settings/i }));
+    await openSettings();
     await userEvent.selectOptions(await screen.findByLabelText("Translation"), "endpoint");
     await waitFor(() => expect(screen.getByLabelText(/translation address/i)).toBeInTheDocument());
     const addr = screen.getByLabelText(/translation address/i);
@@ -126,9 +166,29 @@ describe("settings", () => {
   });
   it("delete-all needs confirmation", async () => {
     await ready();
-    await userEvent.click(await screen.findByRole("button", { name: /settings/i }));
+    await openSettings();
     await userEvent.click(await screen.findByRole("button", { name: /delete all my data/i }));
     expect(mock.calls).not.toContain("deleteAllData");
+  });
+  it("hides the 4B summary download on low-RAM machines", async () => {
+    mock = createMockApi({ installed: false, ramMb: 8000 });
+    setApi(mock);
+    await ready();
+    await openSettings();
+    expect(await screen.findByText(/larger summary model is hidden/i)).toBeInTheDocument();
+    expect(screen.getAllByText((t) => t.includes("Qwen3.5 2B")).length).toBeGreaterThan(0);
+    expect(screen.queryByText((t) => t.includes("Qwen3.5 4B"))).not.toBeInTheDocument();
+  });
+  it("lets high-RAM machines pick either summary model", async () => {
+    mock = createMockApi({ installed: true, ramMb: 16000 });
+    setApi(mock);
+    await ready();
+    await openSettings();
+    expect(screen.getAllByText((t) => t.includes("Qwen3.5 4B")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText((t) => t.includes("Qwen3.5 2B")).length).toBeGreaterThan(0);
+    const pick = await screen.findByLabelText("Summaries model");
+    await userEvent.selectOptions(pick, "sum-qwen-2b");
+    await waitFor(() => expect(mock.calls).toContain("saveSettings"));
   });
 });
 
