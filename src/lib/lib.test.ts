@@ -3,7 +3,7 @@ import { fileSafe, formatBytes, formatClock, formatDuration } from "./format";
 import { emptyLive, groupTurns, reduceLive, speakerName, unknownSpeakers } from "./live";
 import { createMockApi } from "./mockApi";
 import { batchProgress, essentials, featureItems, isLocalUrl, isReady, missing, totalBytes } from "./models";
-import { overlayLines } from "./overlay";
+import { overlayLines, shouldStartOverlayDrag } from "./overlay";
 import { stickToBottom } from "./scroll";
 import { startupMessage } from "./warmup";
 import type { Segment, Speaker } from "./types";
@@ -35,6 +35,11 @@ describe("live reducer", () => {
     let s = reduceLive(emptyLive(), { type: "segment", segment: seg({ id: 1 }) });
     s = reduceLive(s, { type: "segment", segment: seg({ id: 1 }) });
     expect(s.segments).toHaveLength(1);
+  });
+  it("orders live segments by meeting clock", () => {
+    let s = reduceLive(emptyLive(), { type: "segment", segment: seg({ id: 2, t0: 20, text: "later stream" }) });
+    s = reduceLive(s, { type: "segment", segment: seg({ id: 1, t0: 1, text: "earlier mic" }) });
+    expect(s.segments.map((x) => x.id)).toEqual([1, 2]);
   });
   it("attaches translations", () => {
     let s = reduceLive(emptyLive(), { type: "segment", segment: seg({ id: 7 }) });
@@ -71,14 +76,35 @@ describe("turns and speakers", () => {
 });
 
 describe("overlay", () => {
-  it("shows only translated non-mic lines, newest fresh", () => {
-    expect(overlayLines([seg({ id: 1, translation: "a" }), seg({ id: 2, translation: "b" }), seg({ id: 3, translation: "c" })]).map((x) => x.text)).toEqual(["b", "c"]);
+  it("shows all translated non-mic lines by default, newest fresh", () => {
+    expect(overlayLines([seg({ id: 1, translation: "a" }), seg({ id: 2, translation: "b" }), seg({ id: 3, translation: "c" })]).map((x) => x.text)).toEqual(["a", "b", "c"]);
     const l = overlayLines([
       seg({ id: 1, translation: "a" }), seg({ id: 2, stream: "mic", translation: "me" }), seg({ id: 3 }),
       seg({ id: 4, translation: "b" }), seg({ id: 5, translation: "c" }), seg({ id: 6, translation: "d" }),
-    ], 3);
-    expect(l.map((x) => x.text)).toEqual(["b", "c", "d"]);
-    expect(l.map((x) => x.fresh)).toEqual([false, false, true]);
+    ]);
+    expect(l.map((x) => x.text)).toEqual(["a", "b", "c", "d"]);
+    expect(l.map((x) => x.fresh)).toEqual([false, false, false, true]);
+  });
+  it("can still slice to the last n lines when asked", () => {
+    const l = overlayLines([
+      seg({ id: 1, translation: "a" }), seg({ id: 2, translation: "b" }), seg({ id: 3, translation: "c" }),
+    ], 2);
+    expect(l.map((x) => x.text)).toEqual(["b", "c"]);
+  });
+  it("starts a window drag except on the close control and scrollbar", () => {
+    const scroller = {
+      getBoundingClientRect: () => ({ left: 0, right: 200, top: 0, bottom: 100, width: 200, height: 100, x: 0, y: 0, toJSON: () => ({}) }),
+      contains: () => true,
+    };
+    const line = document.createElement("p");
+    expect(shouldStartOverlayDrag({ button: 0, target: line, clientX: 50, scroller })).toBe(true);
+    expect(shouldStartOverlayDrag({ button: 2, target: line, clientX: 50, scroller })).toBe(false);
+    expect(shouldStartOverlayDrag({ button: 0, target: line, clientX: 195, scroller })).toBe(false);
+    const btn = document.createElement("button");
+    btn.setAttribute("data-no-drag", "");
+    const icon = document.createElement("span");
+    btn.appendChild(icon);
+    expect(shouldStartOverlayDrag({ button: 0, target: icon, clientX: 50, scroller })).toBe(false);
   });
 });
 

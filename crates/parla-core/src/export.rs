@@ -7,7 +7,10 @@ pub fn to_markdown(d: &MeetingDetail, date_label: &str) -> String {
     let title = if d.meeting.title.trim().is_empty() { "Meeting" } else { d.meeting.title.trim() };
     let mut out = format!("# {title}\n\n*{date_label}*\n");
     if !d.meeting.summary.trim().is_empty() {
-        out.push_str(&format!("\n## Summary\n\n{}\n", d.meeting.summary.trim()));
+        // The model already returns "## Summary" / "## Decisions" / "## Action items".
+        out.push('\n');
+        out.push_str(d.meeting.summary.trim());
+        out.push('\n');
     }
     if !d.meeting.notes.trim().is_empty() {
         out.push_str(&format!("\n## Notes\n\n{}\n", d.meeting.notes.trim()));
@@ -62,6 +65,15 @@ mod tests {
         assert!(md.contains("**Unknown** (01:10): ??"));
         assert!(md.contains("## Notes\n\nremember x"));
         assert!(!md.contains("## Summary"));
+    }
+
+    #[test]
+    fn markdown_does_not_duplicate_summary_heading() {
+        let mut d = detail();
+        d.meeting.summary = "## Summary\nWe talked.\n## Decisions\nNone\n## Action items\nNone".into();
+        let md = to_markdown(&d, "16 Nov 2026");
+        assert_eq!(md.matches("## Summary").count(), 1, "{md}");
+        assert!(md.contains("## Decisions\nNone"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { setApi } from "../lib/api";
 import { createMockApi, type MockApi } from "../lib/mockApi";
@@ -20,6 +20,11 @@ afterEach(() => {
 async function ready(onboarded = true) {
   if (onboarded) await mock.saveSettings({ ...(await mock.getSettings()), onboarding_done: true });
   render(<App />);
+  if (onboarded) {
+    // Wait for AppProvider + sidebar update check so later assertions aren't racing act().
+    await screen.findByRole("navigation", { name: /main/i });
+    await waitFor(() => expect(mock.calls).toContain("checkForUpdate"));
+  }
 }
 
 async function openSettings() {
@@ -132,19 +137,20 @@ describe("logs", () => {
 });
 
 describe("credits", () => {
-  it("opens profile, studio, and repo links from the sidebar", async () => {
+  it("opens profile, studio, and issues links from the sidebar", async () => {
     await ready();
     await userEvent.click(await screen.findByRole("button", { name: /jany martelli/i }));
     await userEvent.click(await screen.findByRole("button", { name: /^shambix$/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /feedback & issues/i }));
     await userEvent.click(await screen.findByRole("button", { name: /parla on github/i }));
     expect(mock.calls).toContain("openUrl:https://github.com/Jany-M");
-    expect(mock.calls).toContain("openUrl:https://www.shambix.com");
-    expect(mock.calls).toContain("openUrl:https://github.com/Jany-M/parla");
+    expect(mock.calls).toContain("openUrl:https://www.shambix.com/?utm_source=parla&utm_medium=referral&utm_campaign=projects&utm_content=app-sidebar");
+    expect(mock.calls.filter((c) => c === "openUrl:https://github.com/Jany-M/parla/issues")).toHaveLength(2);
   });
 });
 
 describe("updates", () => {
-  it("shows an update button above Open logs and installs on click", async () => {
+  it("shows an update button below the version row and installs on click", async () => {
     mock = createMockApi({
       installed: true,
       update: { version: "0.2.0", tag: "v0.2.0", asset_name: "Parla_0.2.0_x64-setup.exe", size: 1_000_000 },
@@ -153,7 +159,7 @@ describe("updates", () => {
     await ready();
     const btn = await screen.findByRole("button", { name: /update to v0\.2\.0/i });
     const logs = screen.getByRole("button", { name: /open logs/i });
-    expect(btn.compareDocumentPosition(logs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(logs.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await userEvent.click(btn);
     await waitFor(() => expect(mock.calls).toContain("installUpdate"));
   });
@@ -161,6 +167,24 @@ describe("updates", () => {
   it("hides the update button when already current", async () => {
     await ready();
     expect(screen.queryByRole("button", { name: /update to/i })).not.toBeInTheDocument();
+  });
+
+  it("checks again when the version label is clicked and on the hourly timer", async () => {
+    const { UPDATE_CHECK_MS } = await import("../App");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await ready();
+      const before = mock.calls.filter((c) => c === "checkForUpdate").length;
+      await userEvent.click(screen.getByRole("button", { name: /version .*check for updates/i }));
+      await waitFor(() => expect(mock.calls.filter((c) => c === "checkForUpdate").length).toBe(before + 1));
+      const afterClick = mock.calls.filter((c) => c === "checkForUpdate").length;
+      await act(async () => {
+        vi.advanceTimersByTime(UPDATE_CHECK_MS);
+      });
+      await waitFor(() => expect(mock.calls.filter((c) => c === "checkForUpdate").length).toBe(afterClick + 1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -209,28 +233,29 @@ describe("transcript autoscroll", () => {
     await ready();
     await userEvent.click(await screen.findByRole("button", { name: /start recording/i }));
     await screen.findByRole("button", { name: /stop/i });
-    const list = await screen.findByLabelText("Transcript").catch(() => null);
-    expect(list).toBeNull(); // empty state has no list yet
+    // Empty state is a <p>, not the labeled <ol> - queryBy (not findBy) so we don't wait 1s.
+    expect(screen.queryByLabelText("Transcript")).toBeNull();
     const sc = document.querySelector(".overflow-y-auto.min-h-0") as HTMLElement;
     sc.style.overflowY = "auto"; // jsdom does not load the stylesheet
     Object.defineProperty(sc, "scrollHeight", { configurable: true, value: 4000 });
     await act(async () => void mock.addSegment({ id: 500, text: "line one" }));
-    await screen.findByText("line one");
+    expect(await screen.findByText("line one")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Transcript")).toBeInTheDocument();
     await waitFor(() => expect(sc.scrollTop).toBe(4000));
   });
 });
 
 describe("overlay", () => {
-  it("shows the last two sentences", async () => {
+  it("shows the full translation history, newest last", async () => {
     render(<Overlay />);
     await act(async () => {
       mock.addSegment({ id: 1, text: "a", translation: "uno" });
       mock.addSegment({ id: 2, text: "b", translation: "due" });
       mock.addSegment({ id: 3, text: "c", translation: "tre" });
     });
-    expect(await screen.findByText("tre")).toBeInTheDocument();
+    expect(await screen.findByText("uno")).toBeInTheDocument();
     expect(screen.getByText("due")).toBeInTheDocument();
-    expect(screen.queryByText("uno")).not.toBeInTheDocument();
+    expect(screen.getByText("tre")).toBeInTheDocument();
   });
   it("shows translated lines only", async () => {
     setApi(mock);
@@ -238,5 +263,40 @@ describe("overlay", () => {
     await act(async () => void mock.addSegment({ id: 1, text: "orig", translation: "tradotto" }));
     expect(await screen.findByText("tradotto")).toBeInTheDocument();
     expect(screen.queryByText("orig")).not.toBeInTheDocument();
+  });
+  it("resumes following the latest line after scroll idle", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<Overlay />);
+      await act(async () => {
+        mock.addSegment({ id: 1, text: "a", translation: "one" });
+        mock.addSegment({ id: 2, text: "b", translation: "two" });
+      });
+      const box = await screen.findByLabelText("Translation overlay");
+      Object.defineProperty(box, "clientHeight", { configurable: true, value: 100 });
+      Object.defineProperty(box, "scrollHeight", { configurable: true, value: 400 });
+      box.scrollTop = 0;
+      box.dispatchEvent(new Event("scroll"));
+      await act(async () => void mock.addSegment({ id: 3, text: "c", translation: "three" }));
+      expect(box.scrollTop).toBe(0);
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(box.scrollTop).toBe(box.scrollHeight);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("drags the window from the body but not from the close button", async () => {
+    render(<Overlay />);
+    const line = await screen.findByText(/translations of other speakers/i);
+    await act(async () => {
+      line.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 40 }));
+    });
+    expect(mock.calls).toContain("startDragging");
+    mock.calls.length = 0;
+    await userEvent.click(screen.getByRole("button", { name: /hide overlay/i }));
+    expect(mock.calls).toContain("overlay:false");
+    expect(mock.calls).not.toContain("startDragging");
   });
 });

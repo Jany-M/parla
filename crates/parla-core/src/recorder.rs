@@ -13,7 +13,8 @@ use std::sync::Arc;
 /// ended (or `stop` was set) and the session has flushed. A failing source is reported as a
 /// warning and does not stop the others.
 pub fn run(session: Session, sources: Vec<Box<dyn AudioSource>>, stop: Arc<AtomicBool>, sink: Arc<dyn EventSink>) -> Result<()> {
-    let (tx, rx) = sync_channel(256);
+    // ~100 s at 100 ms frames: ASR can lag without the realtime thread dropping Mic audio.
+    let (tx, rx) = sync_channel(1024);
     let mut handles = Vec::new();
     let total = sources.len();
     let failures: Arc<std::sync::Mutex<Vec<String>>> = Default::default();

@@ -50,9 +50,17 @@ impl EchoGuard {
             return false;
         }
         self.recent.iter().any(|s| {
-            let near = t0 <= s.t1 + self.window && t1 >= s.t0 - self.window;
-            near && mic.intersection(&s.tokens).count() as f32 / mic.len() as f32 >= self.min_overlap
+            self.near(s, t0, t1) && mic.intersection(&s.tokens).count() as f32 / mic.len() as f32 >= self.min_overlap
         })
+    }
+
+    /// True when some recent System speech overlaps this Mic window (echo decision is possible).
+    pub fn has_system_near(&self, t0: f64, t1: f64) -> bool {
+        self.recent.iter().any(|s| self.near(s, t0, t1))
+    }
+
+    fn near(&self, s: &Recent, t0: f64, t1: f64) -> bool {
+        t0 <= s.t1 + self.window && t1 >= s.t0 - self.window
     }
 }
 
@@ -74,6 +82,20 @@ impl<T> HoldQueue<T> {
         while self.items.front().map(|(t, _)| now.duration_since(*t) >= self.hold).unwrap_or(false) {
             out.push(self.items.pop_front().unwrap().1);
         }
+        out
+    }
+    /// Removes items for which `take` returns true, preserving hold timestamps of the rest.
+    pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> Vec<T> {
+        let mut out = Vec::new();
+        let mut keep = VecDeque::new();
+        for (t, item) in self.items.drain(..) {
+            if take(&item) {
+                out.push(item);
+            } else {
+                keep.push_back((t, item));
+            }
+        }
+        self.items = keep;
         out
     }
     pub fn drain(&mut self) -> Vec<T> {
@@ -129,6 +151,25 @@ mod tests {
         assert!(q.is_empty());
         q.push(t, "c");
         assert_eq!(q.drain(), ["c"]);
+    }
+
+    #[test]
+    fn hold_queue_extract_if_keeps_the_rest_timed() {
+        let t = Instant::now();
+        let mut q = HoldQueue::new(Duration::from_secs(10));
+        q.push(t, "keep");
+        q.push(t, "take");
+        assert_eq!(q.extract_if(|s| *s == "take"), ["take"]);
+        assert!(q.release_due(t + Duration::from_secs(1)).is_empty());
+        assert_eq!(q.release_due(t + Duration::from_secs(10)), ["keep"]);
+    }
+
+    #[test]
+    fn has_system_near_matches_the_echo_time_window() {
+        let mut g = EchoGuard::default();
+        g.note_system(10.0, 14.0, "alpha beta gamma delta");
+        assert!(g.has_system_near(11.0, 12.0));
+        assert!(!g.has_system_near(100.0, 101.0));
     }
 
     #[test]

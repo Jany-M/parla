@@ -137,7 +137,7 @@ export function MeetingView({ id, onChanged, onDeleted, goTo }: { id: number; on
           aria-label="Meeting title"
           defaultValue={d.meeting.title}
           onBlur={(e) => e.target.value !== d.meeting.title && guard(async () => { await api().renameMeeting(id, e.target.value); await load(); onChanged(); })}
-          className="w-full rounded-lg bg-transparent px-2 py-1 text-xl font-semibold outline-none hover:bg-raised focus:bg-raised"
+          className="w-full rounded-lg border border-line bg-raised px-3 py-2 text-xl font-semibold text-slate-100 outline-none focus:border-accent"
         />
         <div className="flex shrink-0 gap-2">
           <Button onClick={exportMd}>Export .md</Button>

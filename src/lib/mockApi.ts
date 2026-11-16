@@ -121,7 +121,10 @@ export function createMockApi(opts: { installed?: boolean; ramMb?: number; updat
     openLogs: () => track("openLogs", undefined),
     openUrl: (url) => {
       calls.push(`openUrl:${url}`);
-      if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
+      // jsdom stubs open() and logs "Not implemented"; only call it in a real browser.
+      if (typeof window !== "undefined" && !/jsdom/i.test(navigator.userAgent)) {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
       return Promise.resolve();
     },
     logUiError: (m) => track(`logUiError:${m}`, undefined),
@@ -160,6 +163,7 @@ export function createMockApi(opts: { installed?: boolean; ramMb?: number; updat
     exportMarkdown: async (id) => `# Meeting ${id}`,
     saveText: (p, t) => track(`saveText:${p}:${t.length}`, undefined),
     showOverlay: (s) => track(`overlay:${s}`, undefined),
+    startDragging: () => track("startDragging", undefined),
     onEvent: sub(listeners),
     onModelProgress: sub(progress),
     onSummaryProgress: sub(sprogress),

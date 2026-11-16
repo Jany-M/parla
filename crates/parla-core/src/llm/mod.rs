@@ -41,6 +41,10 @@ impl ChatOptions {
     pub fn summary() -> Self {
         Self { temperature: 0.3, top_p: 0.9, top_k: 40, repeat_penalty: 1.05, max_tokens: 1500 }
     }
+    /// One short meeting title after a recording stops.
+    pub fn title() -> Self {
+        Self { temperature: 0.2, top_p: 0.9, top_k: 40, repeat_penalty: 1.05, max_tokens: 48 }
+    }
 }
 
 pub trait ChatModel: Send + Sync {

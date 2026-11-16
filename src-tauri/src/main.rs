@@ -104,8 +104,9 @@ fn main() {
             // The webview profile lives inside our one data folder, so uninstalling removes it too.
             let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Parla")
-                .inner_size(1120.0, 760.0)
-                .min_inner_size(820.0, 560.0)
+                // Shorter default height so 4K @ 300% (≈1280×720 logical) still fits.
+                .inner_size(1080.0, 560.0)
+                .min_inner_size(820.0, 480.0)
                 .data_directory(paths.webview_dir())
                 .build()?;
             let _ = main.set_focus();
@@ -113,7 +114,7 @@ fn main() {
             // The overlay is created hidden and reused; excluded from screen capture/sharing.
             WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html#/overlay".into()))
                 .title("Parla translation")
-                .inner_size(720.0, 170.0)
+                .inner_size(720.0, 280.0)
                 .decorations(false)
                 .transparent(true)
                 .shadow(false)

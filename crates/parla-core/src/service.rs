@@ -374,7 +374,38 @@ impl Service {
         }
         self.stop_translation();
         // `None` when the recording had no speech and was discarded
-        Ok(self.store.get_meeting(r.meeting_id)?.map(|_| r.meeting_id))
+        if self.store.get_meeting(r.meeting_id)?.is_none() {
+            return Ok(None);
+        }
+        // Best-effort short title via the summarize model (already installed for notes).
+        self.assign_ai_title(r.meeting_id);
+        Ok(Some(r.meeting_id))
+    }
+
+    /// Sets a one-line AI title when the meeting still has an empty title.
+    /// Failures are logged and ignored so stopping a recording never fails on titling.
+    fn assign_ai_title(&self, meeting_id: i64) {
+        let result = (|| -> Result<()> {
+            let detail = self.store.get_meeting(meeting_id)?.context("meeting not found")?;
+            if !detail.meeting.title.trim().is_empty() {
+                return Ok(());
+            }
+            let lines = crate::export::transcript_lines(&detail);
+            if lines.iter().all(|l| l.trim().is_empty()) {
+                return Ok(());
+            }
+            let s = self.settings();
+            let lang = languages::by_code(&s.summary_lang).map(|l| l.name).unwrap_or("English");
+            let (model, _server) =
+                self.chat_model(&s.slots.summarize, self.recommendation().summarize_item, 2048, "title")?;
+            let title = summary::generate_title(model.as_ref(), &lines, lang)?;
+            self.store.set_title(meeting_id, &title)?;
+            log::info!("meeting {meeting_id} titled: {title}");
+            Ok(())
+        })();
+        if let Err(e) = result {
+            log::warn!("could not auto-title meeting {meeting_id}: {e:#}");
+        }
     }
 
     // ---- translation overlay ----------------------------------------------
@@ -552,6 +583,24 @@ mod tests {
         assert_eq!(svc.store().get_meeting(m).unwrap().unwrap().meeting.summary, out);
         let body = llm.requests()[0].body.clone();
         assert!(body.contains("in Italian") && body.contains("We agreed to ship on Friday"));
+    }
+
+    #[test]
+    fn stop_live_sets_an_ai_title_from_the_summarize_endpoint() {
+        let llm = MockServer::start(|_| {
+            Reply::json(json!({"choices":[{"message":{"content":"\"Morning standup on the budget\""}}]}))
+        });
+        let (svc, _s, _t) = make(texts(&["Buongiorno a tutti, iniziamo la riunione di oggi"]), Manifest::default());
+        fake_install(&svc, ids::STT);
+        let mut s = svc.settings();
+        s.slots.summarize = SlotChoice::Endpoint { url: llm.base.clone(), model: "m".into(), api_key: None };
+        svc.update_settings(s).unwrap();
+        let id = svc.start_live().unwrap();
+        wait_for(|| svc.store().segments(id).unwrap().len() == 1);
+        assert_eq!(svc.stop_live().unwrap(), Some(id));
+        let title = svc.store().get_meeting(id).unwrap().unwrap().meeting.title;
+        assert_eq!(title, "Morning standup on the budget");
+        assert!(llm.requests().iter().any(|r| r.body.contains("12 words")));
     }
 
     #[test]

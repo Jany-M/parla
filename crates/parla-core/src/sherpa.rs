@@ -13,6 +13,10 @@ use std::path::Path;
 
 pub struct SileroDetector {
     vad: VoiceActivityDetector,
+    /// Reminder samples so every `accept_waveform` is exactly one Silero window (512). Larger
+    /// chunks collapse many windows into one speech/silence decision and shift segment starts.
+    pending: Vec<f32>,
+    window: usize,
 }
 
 fn vad_config(model: &Path) -> VadModelConfig {
@@ -20,7 +24,8 @@ fn vad_config(model: &Path) -> VadModelConfig {
         silero_vad: SileroVadModelConfig {
             model: Some(model.to_string_lossy().into_owned()),
             threshold: 0.4,
-            min_silence_duration: 0.5,
+            // Brief mid-sentence pauses (Bluetooth AGC dips) should not split one thought in two.
+            min_silence_duration: 0.9,
             min_speech_duration: 0.2,
             window_size: 512,
             max_speech_duration: 12.0,
@@ -35,7 +40,7 @@ fn vad_config(model: &Path) -> VadModelConfig {
 impl SileroDetector {
     pub fn new(model: &Path) -> Result<Self> {
         let vad = VoiceActivityDetector::create(&vad_config(model), 60.0).ok_or_else(|| anyhow!("could not load the voice-activity model {}", model.display()))?;
-        Ok(Self { vad })
+        Ok(Self { vad, pending: Vec::new(), window: 512 })
     }
 
     fn drain(&self) -> Vec<SpeechChunk> {
@@ -46,14 +51,32 @@ impl SileroDetector {
         }
         out
     }
+
+    fn feed_windows(&mut self, samples: &[f32]) -> Vec<SpeechChunk> {
+        self.pending.extend_from_slice(samples);
+        let mut out = Vec::new();
+        while self.pending.len() >= self.window {
+            let win: Vec<f32> = self.pending.drain(..self.window).collect();
+            self.vad.accept_waveform(&win);
+            out.extend(self.drain());
+        }
+        out
+    }
 }
 
 impl SpeechDetector for SileroDetector {
     fn accept(&mut self, samples: &[f32]) -> Vec<SpeechChunk> {
-        self.vad.accept_waveform(samples);
-        self.drain()
+        self.feed_windows(samples)
     }
     fn flush(&mut self) -> Vec<SpeechChunk> {
+        if !self.pending.is_empty() {
+            // Zero-pad the tail to a full window so Silero sees the final silence/speech edge.
+            let n = self.pending.len();
+            let pad = self.window - n;
+            let mut tail = std::mem::take(&mut self.pending);
+            tail.extend(std::iter::repeat(0.0).take(pad));
+            self.vad.accept_waveform(&tail);
+        }
         self.vad.flush();
         self.drain()
     }

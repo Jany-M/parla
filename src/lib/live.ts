@@ -15,7 +15,9 @@ export function reduceLive(state: LiveState, e: ParlaEvent | { type: "reset" }):
       return emptyLive();
     case "segment": {
       if (state.segments.some((s) => s.id === e.segment.id)) return state;
-      return { ...state, segments: [...state.segments, e.segment] };
+      // Sort by meeting clock so a delayed mic commit (echo hold) still lands in time order.
+      const segments = [...state.segments, e.segment].sort((a, b) => a.t0 - b.t0 || a.id - b.id);
+      return { ...state, segments };
     }
     case "translation":
       return { ...state, segments: state.segments.map((s) => (s.id === e.segment_id ? { ...s, translation: e.text, translation_lang: e.lang } : s)) };

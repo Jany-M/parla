@@ -42,7 +42,8 @@ pub struct EnergyConfig {
 impl Default for EnergyConfig {
     fn default() -> Self {
         let sr = SAMPLE_RATE as usize;
-        Self { threshold: 0.012, window: sr / 50, hangover: sr * 6 / 10, min_speech: sr / 4, max_speech: sr * 12, preroll: sr / 5 }
+        // Hangover ~0.9 s: short Bluetooth/AGC dips should not split one utterance in two.
+        Self { threshold: 0.012, window: sr / 50, hangover: sr * 9 / 10, min_speech: sr / 4, max_speech: sr * 12, preroll: sr / 5 }
     }
 }
 

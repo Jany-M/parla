@@ -23,6 +23,9 @@
     RMDir /r "$LOCALAPPDATA\Parla"
     RMDir /r "$LOCALAPPDATA\${BUNDLEID}"
     RMDir /r "$APPDATA\${BUNDLEID}"
+    ; leftover from older builds that used com.parla.app
+    RMDir /r "$LOCALAPPDATA\com.parla.app"
+    RMDir /r "$APPDATA\com.parla.app"
     ; anything still locked is removed at next reboot
     ${If} ${FileExists} "$LOCALAPPDATA\Parla"
       RMDir /r /REBOOTOK "$LOCALAPPDATA\Parla"

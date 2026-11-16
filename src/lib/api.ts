@@ -41,6 +41,8 @@ export interface Api {
   exportMarkdown(id: number, dateLabel: string): Promise<string>;
   saveText(path: string, text: string): Promise<void>;
   showOverlay(show: boolean): Promise<void>;
+  /** Begin moving the current window (used by the translation overlay). */
+  startDragging(): Promise<void>;
   onEvent(cb: (e: ParlaEvent) => void): Promise<() => void>;
   onModelProgress(cb: (p: ModelProgress) => void): Promise<() => void>;
   onSummaryProgress(cb: (p: SummaryProgress) => void): Promise<() => void>;
@@ -94,6 +96,10 @@ async function realApi(): Promise<Api> {
     exportMarkdown: (id, dateLabel) => invoke("export_markdown", { id, dateLabel }),
     saveText: (path, text) => invoke("save_text", { path, text }),
     showOverlay: (show) => invoke("show_overlay", { show }),
+    startDragging: async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().startDragging();
+    },
     onEvent: on<ParlaEvent>("parla-event"),
     onModelProgress: on<ModelProgress>("model-progress"),
     onSummaryProgress: on<SummaryProgress>("summary-progress"),

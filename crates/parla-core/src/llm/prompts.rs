@@ -16,7 +16,9 @@ pub fn final_summary_messages(language_name: &str, material: &str) -> Vec<Messag
         Message::system(SYSTEM),
         Message::user(format!(
             "{material}\n\n---\nWrite the meeting notes in {language_name} using exactly these sections:\n\
-## Summary\n3 to 6 sentences.\n## Decisions\nBullet list, or \"None\".\n## Action items\nBullet list as \"Owner: task (due date if stated)\", or \"None\"."
+## Summary\n3 to 6 sentences.\n\
+## Decisions\nBullet list of decisions that were clearly made, or \"None\" if none were stated.\n\
+## Action items\nBullet list as \"Owner: task (due date if stated)\", or \"None\" if nobody was asked to do anything."
         )),
     ]
 }
@@ -28,6 +30,20 @@ pub fn partial_summary_messages(language_name: &str, part: usize, of: usize, sli
         Message::user(format!(
             "This is part {part} of {of} of a meeting transcript (lines are \"Speaker: text\").\n\n{slice}\n\n---\n\
 Write compact bullet-point notes in {language_name}: topics, decisions, action items with owners, and any numbers or dates mentioned."
+        )),
+    ]
+}
+
+/// One short title for a saved transcript (library list / header).
+pub fn title_messages(language_name: &str, transcript: &str) -> Vec<Message> {
+    vec![
+        Message::system(
+            "You write short meeting titles. Use only information present in the transcript. \
+Never invent names, topics or details. Output only the title.",
+        ),
+        Message::user(format!(
+            "{transcript}\n\n---\nWrite one short title for this meeting in {language_name}. \
+A single sentence or phrase, at most 12 words. Do not wrap it in quotes or markdown."
         )),
     ]
 }
@@ -86,6 +102,13 @@ mod tests {
         let m = final_summary_messages("French", "A: hi");
         assert_eq!(m[0].role, "system");
         assert!(m[1].content.contains("in French") && m[1].content.contains("## Action items") && m[1].content.contains("A: hi"));
+    }
+
+    #[test]
+    fn title_prompt_asks_for_one_short_line() {
+        let m = title_messages("Italian", "Me: Ciao\nAnna: Budget review");
+        assert!(m[1].content.contains("in Italian") && m[1].content.contains("Budget review"));
+        assert!(m[1].content.contains("12 words"));
     }
 
     #[test]

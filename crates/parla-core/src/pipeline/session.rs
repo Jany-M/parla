@@ -7,9 +7,9 @@ use crate::languages;
 use crate::store::Store;
 use crate::types::*;
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -55,6 +55,9 @@ struct StreamState {
     history: Vec<f32>,
     /// Absolute sample index of `history[0]`.
     hist_start: u64,
+    /// Meeting-clock offset (seconds) of this stream's sample 0. Set on the first audio so mic and
+    /// system share one timeline even when a device only emits while something is playing.
+    origin_secs: Option<f64>,
 }
 
 const HISTORY_MAX: usize = 40 * 16_000;
@@ -86,7 +89,12 @@ pub struct Session {
     me: Option<i64>,
     guard: EchoGuard,
     held: HoldQueue<NewSegment>,
+    /// Speech waiting for ASR. Kept off the audio path so a slow transcription cannot stall
+    /// VAD / sample clocks (which used to shove trailing Mic lines into the wrong place).
+    pending_asr: VecDeque<(StreamKind, SpeechChunk)>,
     paused: Arc<AtomicBool>,
+    /// Wall origin for aligning per-stream sample clocks onto one meeting timeline.
+    meeting_start: Instant,
 }
 
 fn rms(s: &[f32]) -> f32 {
@@ -106,7 +114,21 @@ fn clean(text: &str) -> Option<String> {
 impl Session {
     pub fn new(store: Store, meeting_id: i64, engine: Engine, sink: Arc<dyn EventSink>, cfg: SessionConfig, make_detector: DetectorFactory) -> Self {
         let hold = cfg.echo_hold;
-        Self { store, meeting_id, engine, sink, cfg, make_detector, streams: HashMap::new(), me: None, guard: EchoGuard::default(), held: HoldQueue::new(hold), paused: Arc::new(AtomicBool::new(false)) }
+        Self {
+            store,
+            meeting_id,
+            engine,
+            sink,
+            cfg,
+            make_detector,
+            streams: HashMap::new(),
+            me: None,
+            guard: EchoGuard::default(),
+            held: HoldQueue::new(hold),
+            pending_asr: VecDeque::new(),
+            paused: Arc::new(AtomicBool::new(false)),
+            meeting_start: Instant::now(),
+        }
     }
 
     /// Shares a pause flag: while set, incoming audio is discarded and the transcript simply
@@ -124,14 +146,32 @@ impl Session {
     pub fn push(&mut self, frame: Frame) -> Result<()> {
         self.sink.emit(Event::Level { stream: frame.stream, level: rms(&frame.samples) });
         for c in self.feed(frame.stream, &frame.samples) {
-            self.handle_chunk(frame.stream, c)?;
+            self.pending_asr.push_back((frame.stream, c));
         }
+        Ok(())
+    }
+
+    /// Runs at most one pending transcription so the caller can keep draining audio.
+    fn transcribe_one(&mut self) -> Result<bool> {
+        let Some((kind, chunk)) = self.pending_asr.pop_front() else {
+            return Ok(false);
+        };
+        self.handle_chunk(kind, chunk)?;
+        Ok(true)
+    }
+
+    fn drain_asr(&mut self) -> Result<()> {
+        while self.transcribe_one()? {}
         Ok(())
     }
 
     /// Every sample the detector sees also goes into the history (same indices).
     fn feed(&mut self, kind: StreamKind, samples: &[f32]) -> Vec<SpeechChunk> {
+        let origin = self.meeting_start.elapsed().as_secs_f64();
         let st = self.state(kind);
+        if st.origin_secs.is_none() {
+            st.origin_secs = Some(origin);
+        }
         if st.history.len() > HISTORY_MAX {
             let cut = st.history.len() - HISTORY_KEEP;
             st.history.drain(..cut);
@@ -139,6 +179,13 @@ impl Session {
         }
         st.history.extend_from_slice(samples);
         st.detector.accept(samples)
+    }
+
+    /// Map a stream-local chunk onto the shared meeting clock.
+    fn meeting_times(&self, kind: StreamKind, chunk: &SpeechChunk) -> (f64, f64) {
+        let origin = self.streams.get(&kind).and_then(|s| s.origin_secs).unwrap_or(0.0);
+        let t0 = origin + chunk.t0();
+        (t0, t0 + chunk.duration())
     }
 
     /// The sentence plus a short lead-in and tail, level-adjusted, for the recogniser.
@@ -162,9 +209,10 @@ impl Session {
         self.release(due)
     }
 
-    /// End of input: flush every detector and release everything still held.
+    /// End of input: flush every detector, finish ASR, and release everything still held.
     pub fn finish(&mut self) -> Result<()> {
         self.flush_streams()?;
+        self.drain_asr()?;
         let rest = self.held.drain();
         self.release(rest)
     }
@@ -172,6 +220,7 @@ impl Session {
     /// Blocking loop for a worker thread; returns when every sender is gone.
     pub fn run(mut self, rx: Receiver<Frame>) -> Result<()> {
         let mut was_paused = false;
+        let mut disconnected = false;
         loop {
             let paused = self.paused.load(Ordering::SeqCst);
             if paused && !was_paused {
@@ -183,13 +232,37 @@ impl Session {
                 log::info!("resume");
             }
             was_paused = paused;
-            match rx.recv_timeout(Duration::from_millis(250)) {
-                Ok(_) if paused => {}
-                Ok(f) => self.push(f)?,
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
+
+            // Keep sample clocks moving: pull every waiting frame before any ASR work.
+            let mut got = false;
+            loop {
+                match rx.try_recv() {
+                    Ok(_) if paused => got = true,
+                    Ok(f) => {
+                        got = true;
+                        self.push(f)?;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
             }
+            if !got && !disconnected {
+                match rx.recv_timeout(Duration::from_millis(250)) {
+                    Ok(_) if paused => {}
+                    Ok(f) => self.push(f)?,
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => disconnected = true,
+                }
+            }
+
+            self.transcribe_one()?;
             self.tick(Instant::now())?;
+            if disconnected && self.pending_asr.is_empty() {
+                break;
+            }
         }
         self.finish()
     }
@@ -210,12 +283,12 @@ impl Session {
         for k in kinds {
             for _ in 0..10 {
                 for c in self.feed(k, &silence) {
-                    self.handle_chunk(k, c)?;
+                    self.pending_asr.push_back((k, c));
                 }
             }
             self.sink.emit(Event::Level { stream: k, level: 0.0 });
         }
-        Ok(())
+        self.drain_asr()
     }
 
     /// Finalises any speech still being collected on every stream and zeroes the meters.
@@ -225,7 +298,7 @@ impl Session {
             self.sink.emit(Event::Level { stream: k, level: 0.0 });
             let chunks = self.state(k).detector.flush();
             for c in chunks {
-                self.handle_chunk(k, c)?;
+                self.pending_asr.push_back((k, c));
             }
         }
         Ok(())
@@ -242,7 +315,14 @@ impl Session {
             last_speaker: None,
             history: Vec::new(),
             hist_start: 0,
+            origin_secs: None,
         })
+    }
+
+    /// Test helper: pin a stream's sample-0 to a meeting-clock offset (seconds).
+    #[cfg(test)]
+    pub fn set_stream_origin_for_test(&mut self, kind: StreamKind, secs: f64) {
+        self.state(kind).origin_secs = Some(secs);
     }
 
     fn warn(&self, message: String) {
@@ -268,20 +348,40 @@ impl Session {
             }
         };
         let Some(text) = clean(&text) else { return Ok(()) };
-        let (t0, t1) = (chunk.t0(), chunk.t0() + chunk.duration());
+        let (t0, t1) = self.meeting_times(kind, &chunk);
         let lang = languages::detect(&text).map(String::from);
         let speaker_id = if kind == StreamKind::Mic { self.me_speaker()? } else { self.assign_speaker(kind, &chunk)? };
         let seg = NewSegment { meeting_id: self.meeting_id, stream: kind, speaker_id: Some(speaker_id), t0, t1, lang, text };
         match kind {
-            StreamKind::Mic if self.cfg.echo_guard => self.held.push(Instant::now(), seg),
-            _ => {
-                if kind == StreamKind::System {
-                    self.guard.note_system(t0, t1, &seg.text);
-                }
+            StreamKind::Mic if self.cfg.echo_guard => self.hold_or_commit_mic(seg)?,
+            StreamKind::System => {
+                self.guard.note_system(t0, t1, &seg.text);
                 self.commit(seg)?;
+                // System speech is what the hold waits for: decide held Mic lines now so they
+                // keep their early timestamps instead of landing after the remote talker.
+                self.release_held_against_system()?;
             }
+            _ => self.commit(seg)?,
         }
         Ok(())
+    }
+
+    fn hold_or_commit_mic(&mut self, seg: NewSegment) -> Result<()> {
+        if self.guard.is_echo(seg.t0, seg.t1, &seg.text) {
+            log::info!("echo guard dropped mic segment: {}", seg.text);
+            return Ok(());
+        }
+        if self.guard.has_system_near(seg.t0, seg.t1) {
+            // Overlapping System speech already seen and it did not match: commit immediately.
+            return self.commit(seg);
+        }
+        self.held.push(Instant::now(), seg);
+        Ok(())
+    }
+
+    fn release_held_against_system(&mut self) -> Result<()> {
+        let decided = self.held.extract_if(|seg| self.guard.has_system_near(seg.t0, seg.t1));
+        self.release(decided)
     }
 
     fn release(&mut self, items: Vec<NewSegment>) -> Result<()> {
@@ -377,6 +477,7 @@ mod tests {
         for c in audio.chunks(1600) {
             s.push(Frame { stream: kind, samples: c.to_vec() }).unwrap();
         }
+        s.drain_asr().unwrap();
     }
 
     fn names(r: &Rig) -> Vec<(String, String)> {
@@ -399,6 +500,25 @@ mod tests {
         assert!(segs[0].t0 > 0.7 && segs[0].t0 <= 1.0 && segs[0].t1 > 3.0 && segs[0].t1 < 3.3, "{:?}", (segs[0].t0, segs[0].t1));
         assert_eq!(segs[0].lang.as_deref(), Some("en"));
         assert_eq!(r.sink.segments(), segs);
+    }
+
+    #[test]
+    fn mic_and_system_share_one_meeting_clock_when_origins_differ() {
+        // System-only devices often start their sample clock late (no silence frames). Without a
+        // shared origin, both streams look like they begin at 00:00 and the library order is wrong.
+        let (mut s, r) = rig(&["hello from me on the mic", "hello from the youtube speaker"], true, cfg0());
+        s.prepare(&[StreamKind::Mic, StreamKind::System]);
+        s.set_stream_origin_for_test(StreamKind::Mic, 0.0);
+        s.set_stream_origin_for_test(StreamKind::System, 20.0);
+        burst(&mut s, StreamKind::Mic, 0.5, 0.3, 1.5);
+        burst(&mut s, StreamKind::System, 0.5, 0.3, 1.5);
+        s.finish().unwrap();
+        let segs = r.store.segments(r.meeting).unwrap();
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].stream, StreamKind::Mic, "mic (earlier origin) sorts first");
+        assert_eq!(segs[1].stream, StreamKind::System);
+        assert!(segs[0].t0 < 5.0, "mic near the start: {}", segs[0].t0);
+        assert!(segs[1].t0 > 18.0, "system shifted by origin: {}", segs[1].t0);
     }
 
     #[test]
@@ -481,6 +601,36 @@ mod tests {
         assert!(r.store.segments(r.meeting).unwrap().is_empty(), "still held");
         s.finish().unwrap();
         assert_eq!(r.store.segments(r.meeting).unwrap().len(), 1, "finish releases everything");
+    }
+
+    #[test]
+    fn system_speech_releases_held_mic_so_it_keeps_its_early_time() {
+        // Trailing Mic phrases used to stay held while System ASR ran, then show up under the
+        // remote speaker. Once System is known (and is not an echo match), commit Mic immediately.
+        let cfg = SessionConfig { echo_hold: Duration::from_secs(60), ..Default::default() };
+        let (mut s, r) = rig(&["and the microphone input with live translation", "a customer says the checkout button does nothing"], true, cfg);
+        burst(&mut s, StreamKind::Mic, 0.2, 0.3, 1.5);
+        assert!(r.store.segments(r.meeting).unwrap().is_empty(), "mic waiting on hold");
+        burst(&mut s, StreamKind::System, 0.2, 0.3, 1.5);
+        let segs = r.store.segments(r.meeting).unwrap();
+        assert_eq!(segs.len(), 2, "mic released as soon as system arrived");
+        assert_eq!(segs[0].stream, StreamKind::Mic);
+        assert_eq!(segs[1].stream, StreamKind::System);
+        assert!(segs[0].t0 < segs[1].t0, "mic stays earlier on the meeting clock: {:?} vs {:?}", segs[0].t0, segs[1].t0);
+    }
+
+    #[test]
+    fn push_only_queues_asr_so_audio_can_keep_moving() {
+        let (mut s, r) = rig(&["queued until drain"], true, cfg0());
+        let audio = cat(&[silence(0.5), tone(200.0, 1.5, 0.3), silence(1.0)]);
+        for c in audio.chunks(1600) {
+            s.push(Frame { stream: StreamKind::Mic, samples: c.to_vec() }).unwrap();
+        }
+        assert!(r.store.segments(r.meeting).unwrap().is_empty(), "no ASR until drained");
+        assert!(!s.pending_asr.is_empty());
+        s.drain_asr().unwrap();
+        s.finish().unwrap();
+        assert_eq!(r.store.segments(r.meeting).unwrap().len(), 1);
     }
 
     #[test]
