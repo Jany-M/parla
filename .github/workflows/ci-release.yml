@@ -1,6 +1,6 @@
 # Parla CI / release orchestrator
 #
-# Gate diagram (every job below is a hard gate — downstream only runs if upstream is green):
+# Gate diagram (every job below is a hard gate  -  downstream only runs if upstream is green):
 #
 #   ┌──────────────┐
 #   │ gate-changes │  (detect app-build path changes; always continues)
@@ -157,7 +157,7 @@ jobs:
           build='${{ needs.gate-changes.outputs.build }}'
           echo "build_paths_changed=$build"
           if [ "$build" != "true" ]; then
-            echo "No app/build paths changed (e.g. FUNDING.yml, README, LICENSE) — tests skipped."
+            echo "No app/build paths changed (e.g. FUNDING.yml, README, LICENSE)  -  tests skipped."
             exit 0
           fi
           for result in \
@@ -246,7 +246,7 @@ jobs:
           $file = '${{ steps.artifact.outputs.path }}'
           $existing = gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $tag already exists — uploading asset (clobber)"
+            Write-Host "Release $tag already exists  -  uploading asset (clobber)"
             gh release upload $tag $file --clobber
           } else {
             gh release create $tag $file `

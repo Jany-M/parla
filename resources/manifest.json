@@ -4,7 +4,7 @@
     {
       "id": "stt-parakeet-tdt-0.6b-v3-int8",
       "slot": "stt",
-      "label": "Speech recognition \u2014 Parakeet TDT 0.6B v3 (int8)",
+      "label": "Speech recognition - Parakeet TDT 0.6B v3 (int8)",
       "description": "Transcribes 25 European languages, including Italian, English and French. Runs on the CPU.",
       "license": "CC-BY-4.0 (NVIDIA)",
       "platform": "any",
@@ -38,7 +38,7 @@
     {
       "id": "vad-silero",
       "slot": "vad",
-      "label": "Voice activity \u2014 Silero VAD",
+      "label": "Voice activity - Silero VAD",
       "description": "Finds where people are speaking.",
       "license": "MIT",
       "platform": "any",
@@ -54,7 +54,7 @@
     {
       "id": "spk-wespeaker-resnet34",
       "slot": "speaker",
-      "label": "Speaker recognition \u2014 WeSpeaker ResNet34",
+      "label": "Speaker recognition - WeSpeaker ResNet34",
       "description": "Tells voices apart so each person gets their own label.",
       "license": "Apache-2.0",
       "platform": "any",
@@ -70,7 +70,7 @@
     {
       "id": "mt-hy-mt2-1.8b-q4km",
       "slot": "translate",
-      "label": "Translation \u2014 Hy-MT2 1.8B (Q4_K_M)",
+      "label": "Translation - Hy-MT2 1.8B (Q4_K_M)",
       "description": "Live translation between 33 languages. Loaded only while translation is on.",
       "license": "Apache-2.0 (Tencent)",
       "platform": "any",
@@ -86,7 +86,7 @@
     {
       "id": "sum-qwen3.5-2b-q4km",
       "slot": "summarize",
-      "label": "Summaries \u2014 Qwen3.5 2B (Q4_K_M)",
+      "label": "Summaries - Qwen3.5 2B (Q4_K_M)",
       "description": "Compact model for 8 GB laptops.",
       "license": "Apache-2.0 (Alibaba)",
       "platform": "any",
@@ -102,7 +102,7 @@
     {
       "id": "sum-qwen3.5-4b-q4km",
       "slot": "summarize",
-      "label": "Summaries \u2014 Qwen3.5 4B (Q4_K_M)",
+      "label": "Summaries - Qwen3.5 4B (Q4_K_M)",
       "description": "Better notes on laptops with 16 GB or more.",
       "license": "Apache-2.0 (Alibaba)",
       "platform": "any",
@@ -118,7 +118,7 @@
     {
       "id": "rt-llama-cpp-windows",
       "slot": "runtime",
-      "label": "Language-model runtime \u2014 llama.cpp b12438",
+      "label": "Language-model runtime - llama.cpp b12438",
       "description": "Runs the translation and summary models on your CPU.",
       "license": "MIT",
       "platform": "windows",

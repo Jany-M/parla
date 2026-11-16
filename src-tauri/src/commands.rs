@@ -50,6 +50,35 @@ pub fn open_logs(s: State<AppState>) -> Res<()> {
     })
 }
 
+/// Opens an http(s) URL in the default browser (new window/tab).
+#[tauri::command]
+pub fn open_url(url: String) -> Res<()> {
+    let url = url.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) links are allowed".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // `start` needs an empty title argument when the URL is quoted.
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| {
+                log::error!("could not open url: {e}");
+                e.to_string()
+            })
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
 /// Errors from the web UI land in the same log file.
 #[tauri::command]
 pub fn log_ui_error(message: String) {

@@ -131,6 +131,18 @@ describe("logs", () => {
   });
 });
 
+describe("credits", () => {
+  it("opens profile, studio, and repo links from the sidebar", async () => {
+    await ready();
+    await userEvent.click(await screen.findByRole("button", { name: /jany martelli/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^shambix$/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /parla on github/i }));
+    expect(mock.calls).toContain("openUrl:https://github.com/Jany-M");
+    expect(mock.calls).toContain("openUrl:https://www.shambix.com");
+    expect(mock.calls).toContain("openUrl:https://github.com/Jany-M/parla");
+  });
+});
+
 describe("updates", () => {
   it("shows an update button above Open logs and installs on click", async () => {
     mock = createMockApi({

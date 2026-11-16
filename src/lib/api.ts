@@ -19,6 +19,7 @@ export interface Api {
   stopLive(): Promise<number | null>;
   recordingState(): Promise<number | null>;
   openLogs(): Promise<void>;
+  openUrl(url: string): Promise<void>;
   logUiError(message: string): Promise<void>;
   checkForUpdate(): Promise<UpdateInfo | null>;
   installUpdate(): Promise<void>;
@@ -71,6 +72,7 @@ async function realApi(): Promise<Api> {
     stopLive: () => invoke("stop_live"),
     recordingState: () => invoke("recording_state"),
     openLogs: () => invoke("open_logs"),
+    openUrl: (url) => invoke("open_url", { url }),
     logUiError: (message) => invoke("log_ui_error", { message }),
     checkForUpdate: () => invoke("check_for_update"),
     installUpdate: () => invoke("install_update"),

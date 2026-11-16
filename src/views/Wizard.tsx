@@ -62,7 +62,7 @@ export function Wizard() {
           <p className="text-sm">About <strong>{ramGb} GB</strong> RAM · {info.system.hardware.cpu_threads} CPU threads{info.system.hardware.has_avx2 ? "" : " · no AVX2"}</p>
           {summaryPick && (
             <p className="mt-2 text-sm text-mute">
-              Recommended summaries model: <span className="text-ink">{summaryPick.label}</span>
+              Recommended summaries model: <span className="font-medium text-slate-100">{summaryPick.label}</span>
               {ramGb < 16 ? " (the larger 4B model needs about 16 GB RAM)." : " (you can switch to the smaller 2B model later in Settings)."}
             </p>
           )}
@@ -78,7 +78,7 @@ export function Wizard() {
               <span className="text-mute">{formatBytes(totalBytes(featureItems(models, "translate")))}</span>
             </li>
             <li className="flex items-start justify-between gap-3">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={wantSummary} onChange={(e) => setWantSummary(e.target.checked)} disabled={phase === "download"} /> Meeting summaries{summaryPick ? ` — ${summaryPick.label}` : ""}</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={wantSummary} onChange={(e) => setWantSummary(e.target.checked)} disabled={phase === "download"} /> Meeting summaries{summaryPick ? ` - ${summaryPick.label}` : ""}</label>
               <span className="text-mute">{formatBytes(totalBytes(featureItems(models, "summarize")))}</span>
             </li>
           </ul>

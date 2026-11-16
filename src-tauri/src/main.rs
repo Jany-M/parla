@@ -153,6 +153,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::open_logs,
+            commands::open_url,
             commands::log_ui_error,
             commands::get_settings,
             commands::save_settings,

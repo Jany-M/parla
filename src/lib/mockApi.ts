@@ -40,8 +40,8 @@ export function createMockApi(opts: { installed?: boolean; ramMb?: number; updat
     model("vad-silero", "vad", "Voice activity", 1, opts.installed),
     model("spk-wespeaker", "speaker", "Speaker recognition", 27, opts.installed),
     model("mt-hy-mt2", "translate", "Translation", 1130, opts.installed),
-    model("sum-qwen-2b", "summarize", "Summaries — Qwen3.5 2B", 1280, opts.installed, { recommended: !highRam, eligible: true }),
-    model("sum-qwen-4b", "summarize", "Summaries — Qwen3.5 4B", 2614, opts.installed, { recommended: highRam, eligible: highRam }),
+    model("sum-qwen-2b", "summarize", "Summaries - Qwen3.5 2B", 1280, opts.installed, { recommended: !highRam, eligible: true }),
+    model("sum-qwen-4b", "summarize", "Summaries - Qwen3.5 4B", 2614, opts.installed, { recommended: highRam, eligible: highRam }),
     model("rt-llama", "runtime", "Language-model runtime", 25, opts.installed),
   ];
   let meetings: MeetingDetail[] = [];
@@ -119,6 +119,11 @@ export function createMockApi(opts: { installed?: boolean; ramMb?: number; updat
     },
     recordingState: () => track("recordingState", recording),
     openLogs: () => track("openLogs", undefined),
+    openUrl: (url) => {
+      calls.push(`openUrl:${url}`);
+      if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
+      return Promise.resolve();
+    },
     logUiError: (m) => track(`logUiError:${m}`, undefined),
     checkForUpdate: () => track("checkForUpdate", update),
     installUpdate: async () => {

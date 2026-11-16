@@ -12,7 +12,7 @@ Local AI/LLMs only (max privacy), no accounts, no subscriptions, no cloud, no hi
 
 * **Record & pause** in one continuous transcript (resume without starting a new meeting)
 * **Auto-saves** transcripts as you go, including any live translations
-* **Translate on demand** — turn the floating overlay on when you need it
+* **Translate on demand** - turn the floating overlay on when you need it
 * **Summarize on demand** after a meeting (or skip it)
 * **Export to Markdown** (`.md`) for notes elsewhere
 
@@ -89,4 +89,4 @@ Jany Martelli
 
 ## Need a custom web / mobile / cloud / AI app developed?
 
-See tech firm [Shambix](https://www.shambix.com) services or email [info@shambix.com](mailto:info@shambix.com).
+See tech firm [Shambix](https://www.shambix.com/?utm_source=parla&utm_medium=referral&utm_campaign=projects&utm_content=github-readme) services or email [info@shambix.com](mailto:info@shambix.com).
