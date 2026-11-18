@@ -42,21 +42,25 @@ The first-run wizard detects your RAM and only offers the summary model that fit
 ### Windows
 
 Install the `*-setup.exe` (per-user, no admin). App data lives in `%LOCALAPPDATA%\Parla`
-(settings, meetings DB, downloaded models, llama.cpp runtime, logs, webview profile).
+(settings, meetings DB, downloaded models, llama.cpp runtime, logs, webview profile). Updating the app keeps your data.
+
+*If Windows shows a blue warning screen on first install, proceed anyway (not paying for a code signing cert for an open source app and will not be forced on the MS store either, sorry). Code is open, feel free to scan it.*
 
 **Uninstall** (Windows Settings → Apps → Parla) stops any background model server and deletes that folder
 plus the app's webview/roaming leftovers. In-app: Settings → “Delete all my data…” wipes the same data
-without uninstalling. Updating the app keeps your data. The in-app **Update** button works on Windows.
+without uninstalling.
 
 ### macOS
 
-Open the universal `.dmg` and drag Parla to Applications. Builds are **unsigned** (no Apple Developer fee):
+Open the universal `.dmg` and drag Parla to Applications:
 
 1. First launch: if Gatekeeper blocks the app, **right-click → Open** (once), or run:
    `xattr -dr com.apple.quarantine /Applications/Parla.app`
 2. Grant **Microphone** in System Settings if the mic meter stays flat. For system audio (what other apps play), allow Screen Recording / system audio if macOS prompts.
 3. Data lives in `~/Library/Application Support/Parla`.
-4. In-app update is Windows-only (silent NSIS). On Mac the app opens the Releases page so you can install the new DMG; Gatekeeper steps above still apply. Update helper details land in `logs/update.log` (Open logs).
+4. Auto-Update is not available on Mac, so the update button will take you to this repo->latest releases, download the latest .dmg and move it to Applications (like the first time); Gatekeeper steps above still apply.
+
+*If the MacOS flags as unsafe/unsigned, proceed anyway (not paying an Apple Developers fee on an open source app, sorry). Code is open, feel free to scan it.*
 
 ## Build
 
