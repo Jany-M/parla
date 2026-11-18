@@ -226,25 +226,33 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
         assert!(LlamaServer::start(&c).err().unwrap().to_string().contains("model file not found"));
     }
 
+    /// Real ELF under `dir` (copying `/bin/sleep` exits immediately on some runners when argv0 changes).
+    fn stale_stub(dir: &Path) -> PathBuf {
+        let src = dir.join("stale_stub.rs");
+        let exe = dir.join("llama-server");
+        std::fs::write(&src, "fn main() { loop { std::thread::park(); } }\n").unwrap();
+        let st = Command::new("rustc").args(["-C", "opt-level=0", "-o"]).arg(&exe).arg(&src).status().expect("run rustc");
+        assert!(st.success(), "rustc failed to build kill_stale stub: {st}");
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        exe
+    }
+
     #[test]
     fn kill_stale_only_kills_processes_from_the_given_dir() {
         let t = tempfile::tempdir().unwrap();
-        let sleep_src = ["/bin/sleep", "/usr/bin/sleep"].into_iter().find(|p| Path::new(p).exists()).expect("sleep binary");
-        let sleep = t.path().join("llama-server");
-        std::fs::copy(sleep_src, &sleep).unwrap();
-        std::fs::set_permissions(&sleep, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut mine = Command::new(&sleep).arg("60").spawn().unwrap();
-        let mut other = Command::new(sleep_src).arg("60").spawn().unwrap();
+        let other_dir = tempfile::tempdir().unwrap();
+        let mine_exe = stale_stub(t.path());
+        let other_exe = stale_stub(other_dir.path());
+        let mut mine = Command::new(&mine_exe).spawn().unwrap();
+        let mut other = Command::new(&other_exe).spawn().unwrap();
         std::thread::sleep(Duration::from_millis(100));
         if let Some(st) = mine.try_wait().unwrap() {
             other.kill().ok();
-            panic!("copied sleep exited immediately ({st}); cannot test kill_stale");
+            panic!("stub exited immediately ({st}); cannot test kill_stale");
         }
-        // On Linux, confirm /proc sees the exe under our temp dir (the same signal kill_stale uses).
         #[cfg(target_os = "linux")]
         {
-            let exe = std::fs::read_link(format!("/proc/{}/exe", mine.id())).expect("read /proc/pid/exe");
-            let exe = strip_deleted_suffix(exe);
+            let exe = strip_deleted_suffix(std::fs::read_link(format!("/proc/{}/exe", mine.id())).expect("read /proc/pid/exe"));
             assert!(
                 path_under_dir(&exe, &std::fs::canonicalize(t.path()).unwrap()),
                 "child exe {exe:?} should live under {:?}",
