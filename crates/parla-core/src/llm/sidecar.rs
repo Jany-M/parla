@@ -84,13 +84,58 @@ impl Drop for LlamaServer {
     }
 }
 
-/// Kills leftover runtime processes (e.g. after a crash) whose executable lives under `dir`.
-/// Returns how many were killed.
-pub fn kill_stale(dir: &Path) -> usize {
-    // Canonicalize so `/tmp/foo` matches processes whose `/proc/pid/exe` resolved through a symlink.
+fn path_under_dir(path: &Path, dir: &Path) -> bool {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    path.starts_with(dir)
+}
+
+/// Strip the ` (deleted)` suffix Linux adds to `/proc/pid/exe` when the file was replaced.
+#[cfg(any(target_os = "linux", all(test, unix)))]
+fn strip_deleted_suffix(path: PathBuf) -> PathBuf {
+    const DELETED: &[u8] = b" (deleted)";
+    let Some(name) = path.file_name() else { return path };
+    let bytes = name.as_encoded_bytes();
+    if !bytes.ends_with(DELETED) {
+        return path;
+    }
+    let trimmed = bytes[..bytes.len() - DELETED.len()].to_vec();
+    let mut out = path;
+    // SAFETY: we only removed an ASCII suffix from bytes that were already a valid OsStr.
+    unsafe {
+        out.set_file_name(std::ffi::OsString::from_encoded_bytes_unchecked(trimmed));
+    }
+    out
+}
+
+/// Linux: read `/proc/*/exe` directly. More reliable than sysinfo here (open-file limits / refresh
+/// kind can leave `Process::exe` empty on CI runners, so stale llama-server processes survive).
+#[cfg(target_os = "linux")]
+fn kill_stale_impl(dir: &Path) -> usize {
+    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let Ok(entries) = std::fs::read_dir("/proc") else { return 0 };
+    let mut n = 0;
+    for entry in entries.flatten() {
+        let pid = match entry.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) {
+            Some(p) => p,
+            None => continue,
+        };
+        let Ok(raw) = std::fs::read_link(format!("/proc/{pid}/exe")) else { continue };
+        let exe = strip_deleted_suffix(raw);
+        if !path_under_dir(&exe, &dir) {
+            continue;
+        }
+        let ok = Command::new("kill").args(["-KILL", &pid.to_string()]).status().map(|s| s.success()).unwrap_or(false);
+        if ok {
+            n += 1;
+        }
+    }
+    n
+}
+
+#[cfg(not(target_os = "linux"))]
+fn kill_stale_impl(dir: &Path) -> usize {
     let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let mut sys = sysinfo::System::new();
-    // Only exe (+ no Linux tasks/threads): cheaper and reliably fills `Process::exe` on CI.
     sys.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::All,
         true,
@@ -99,12 +144,17 @@ pub fn kill_stale(dir: &Path) -> usize {
     let mut n = 0;
     for p in sys.processes().values() {
         let Some(exe) = p.exe() else { continue };
-        let exe = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
-        if exe.starts_with(&dir) && p.kill() {
+        if path_under_dir(exe, &dir) && p.kill() {
             n += 1;
         }
     }
     n
+}
+
+/// Kills leftover runtime processes (e.g. after a crash) whose executable lives under `dir`.
+/// Returns how many were killed.
+pub fn kill_stale(dir: &Path) -> usize {
+    kill_stale_impl(dir)
 }
 
 #[cfg(all(test, unix))]
@@ -185,19 +235,23 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
         std::fs::set_permissions(&sleep, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut mine = Command::new(&sleep).arg("60").spawn().unwrap();
         let mut other = Command::new(sleep_src).arg("60").spawn().unwrap();
-        // sysinfo can lag briefly after spawn on Linux runners; retry until our copy is visible.
-        let mut killed = 0;
-        for _ in 0..50 {
-            if mine.try_wait().unwrap().is_some() {
-                other.kill().ok();
-                panic!("dir-local sleep exited before kill_stale ran");
-            }
-            killed = kill_stale(t.path());
-            if killed >= 1 {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
+        if let Some(st) = mine.try_wait().unwrap() {
+            other.kill().ok();
+            panic!("copied sleep exited immediately ({st}); cannot test kill_stale");
         }
+        // On Linux, confirm /proc sees the exe under our temp dir (the same signal kill_stale uses).
+        #[cfg(target_os = "linux")]
+        {
+            let exe = std::fs::read_link(format!("/proc/{}/exe", mine.id())).expect("read /proc/pid/exe");
+            let exe = strip_deleted_suffix(exe);
+            assert!(
+                path_under_dir(&exe, &std::fs::canonicalize(t.path()).unwrap()),
+                "child exe {exe:?} should live under {:?}",
+                t.path()
+            );
+        }
+        let killed = kill_stale(t.path());
         assert_eq!(killed, 1, "kill_stale should kill only the runtime under the temp dir");
         assert!(mine.wait().is_ok());
         assert!(other.try_wait().unwrap().is_none(), "unrelated process must survive");
