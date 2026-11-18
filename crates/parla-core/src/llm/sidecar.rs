@@ -87,11 +87,20 @@ impl Drop for LlamaServer {
 /// Kills leftover runtime processes (e.g. after a crash) whose executable lives under `dir`.
 /// Returns how many were killed.
 pub fn kill_stale(dir: &Path) -> usize {
+    // Canonicalize so `/tmp/foo` matches processes whose `/proc/pid/exe` resolved through a symlink.
+    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let mut sys = sysinfo::System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    // Only exe (+ no Linux tasks/threads): cheaper and reliably fills `Process::exe` on CI.
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        true,
+        sysinfo::ProcessRefreshKind::nothing().with_exe(sysinfo::UpdateKind::Always).without_tasks(),
+    );
     let mut n = 0;
     for p in sys.processes().values() {
-        if p.exe().map(|e| e.starts_with(dir)).unwrap_or(false) && p.kill() {
+        let Some(exe) = p.exe() else { continue };
+        let exe = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+        if exe.starts_with(&dir) && p.kill() {
             n += 1;
         }
     }
@@ -170,12 +179,26 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
     #[test]
     fn kill_stale_only_kills_processes_from_the_given_dir() {
         let t = tempfile::tempdir().unwrap();
+        let sleep_src = ["/bin/sleep", "/usr/bin/sleep"].into_iter().find(|p| Path::new(p).exists()).expect("sleep binary");
         let sleep = t.path().join("llama-server");
-        std::fs::copy("/bin/sleep", &sleep).unwrap();
+        std::fs::copy(sleep_src, &sleep).unwrap();
+        std::fs::set_permissions(&sleep, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut mine = Command::new(&sleep).arg("60").spawn().unwrap();
-        let mut other = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-        std::thread::sleep(Duration::from_millis(200));
-        assert_eq!(kill_stale(t.path()), 1);
+        let mut other = Command::new(sleep_src).arg("60").spawn().unwrap();
+        // sysinfo can lag briefly after spawn on Linux runners; retry until our copy is visible.
+        let mut killed = 0;
+        for _ in 0..50 {
+            if mine.try_wait().unwrap().is_some() {
+                other.kill().ok();
+                panic!("dir-local sleep exited before kill_stale ran");
+            }
+            killed = kill_stale(t.path());
+            if killed >= 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(killed, 1, "kill_stale should kill only the runtime under the temp dir");
         assert!(mine.wait().is_ok());
         assert!(other.try_wait().unwrap().is_none(), "unrelated process must survive");
         other.kill().unwrap();
