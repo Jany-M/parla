@@ -1,6 +1,6 @@
 # ![Parla](src-tauri/icons/32x32.png) Parla
 
-[![Version](https://img.shields.io/github/v/release/Jany-M/parla?include_prereleases&sort=semver&label=version&style=flat-square)](https://github.com/Jany-M/parla/releases/latest)
+[![Version](https://img.shields.io/github/v/release/Jany-M/parla?include_prereleases&sort=semver&label=version&style=flat-square)](https://github.com/Jany-M/parla/releases/latest) [![Builds (Win/MacOS)](https://github.com/Jany-M/parla/actions/workflows/ci-release.yml/badge.svg)](https://github.com/Jany-M/parla/actions/workflows/ci-release.yml)
 
 Meeting notes for Windows and macOS: records yourself or your meetings (any app), transcribes verbatim, recognizes different speakers and can translate them live in a floating overlay, then summarizes on demand.
 
