@@ -24,18 +24,22 @@
 #                       │  only on push to main, build paths changed,
 #                       │  and commit is not a post-release bump
 #                       ▼
-#              ┌─────────────────┐
-#              │ release-build   │  build installer for CURRENT version
-#              │ + publish       │  create GitHub Release tag vX.Y.Z
-#              └────────┬────────┘
-#                       ▼
-#              ┌─────────────────┐
-#              │ post-bump       │  patch-bump repo (X.Y.Z → X.Y.Z+1) for next pull
-#              └────────┬────────┘
-#                       ▼
-#              ┌─────────────────┐
-#              │ prune-releases  │  keep latest 2 GitHub Releases only
-#              └─────────────────┘
+#          ┌────────────────┐   ┌──────────────┐
+#          │ release-windows│   │ release-macos│  parallel artifacts
+#          └───────┬────────┘   └──────┬───────┘
+#                  └─────────┬─────────┘
+#                            ▼
+#                   ┌─────────────────┐
+#                   │ release-publish │  one GitHub Release (exe + dmg)
+#                   └────────┬────────┘
+#                            ▼
+#                   ┌─────────────────┐
+#                   │ post-bump       │  X.Y.Z → X.Y.Z+1 for next pull
+#                   └────────┬────────┘
+#                            ▼
+#                   ┌─────────────────┐
+#                   │ prune-releases  │  keep latest 2 GitHub Releases only
+#                   └─────────────────┘
 #
 # ```mermaid
 # flowchart TD
@@ -46,9 +50,12 @@
 #   B --> E
 #   C --> E
 #   D --> E
-#   E -->|main + build paths + not bump commit| F[release-build]
-#   F --> G[post-bump]
-#   G --> H[prune-releases keep 2]
+#   E -->|main + build paths + not bump commit| W[release-windows]
+#   E -->|same release if| M[release-macos]
+#   W --> P[release-publish]
+#   M --> P
+#   P --> G[post-bump]
+#   P --> H[prune-releases keep 2]
 # ```
 
 name: CI / Release
@@ -172,9 +179,9 @@ jobs:
           done
           echo "typecheck ✓  rust ✓  frontend ✓"
 
-  # ── Release: build CURRENT version installer (Windows) ─────────────────────
-  release-build:
-    name: "Release · build + publish"
+  # ── Release: Windows NSIS (artifact only) ──────────────────────────────────
+  release-windows:
+    name: "Release · Windows NSIS"
     needs: [gate-changes, gate-all-green]
     if: >
       github.event_name == 'push' &&
@@ -183,9 +190,7 @@ jobs:
       !contains(github.event.head_commit.message, '[skip release]')
     runs-on: windows-latest
     permissions:
-      contents: write
-    # Keep Cargo output in the workspace so Swatinem/rust-cache can restore it.
-    # (build.ps1 otherwise redirects to %LOCALAPPDATA%\parla-build\target for Dropbox.)
+      contents: read
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     outputs:
@@ -226,38 +231,122 @@ jobs:
       - name: Build Windows installer
         run: .\scripts\build.ps1 -SkipTests -SkipNpm
 
-      - name: Locate installer
-        id: artifact
-        shell: pwsh
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: parla-windows-nsis
+          path: release/*-setup.exe
+          if-no-files-found: error
+
+  # ── Release: macOS universal DMG (artifact only; Darwin tools only here) ───
+  release-macos:
+    name: "Release · macOS DMG"
+    needs: [gate-changes, gate-all-green]
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      needs.gate-changes.outputs.build == 'true' &&
+      !contains(github.event.head_commit.message, '[skip release]')
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: parla-macos-release
+          cache-targets: true
+          cache-all-crates: true
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build universal macOS DMG
         run: |
-          $exe = Get-ChildItem release -Filter '*-setup.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $exe) { throw 'No installer found in release/' }
-          "path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "name=$($exe.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Installer: $($exe.FullName)"
+          chmod +x scripts/build-macos.sh
+          ./scripts/build-macos.sh --skip-tests --skip-npm
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: parla-macos-dmg
+          path: release/*.dmg
+          if-no-files-found: error
+
+  # ── Publish: one GitHub Release with both artifacts ────────────────────────
+  release-publish:
+    name: "Release · publish"
+    needs: [release-windows, release-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ needs.release-windows.outputs.version }}
+      tag: ${{ needs.release-windows.outputs.tag }}
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: parla-windows-nsis
+          path: dist
+
+      - name: Download macOS DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: parla-macos-dmg
+          path: dist
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
+          TAG: ${{ needs.release-windows.outputs.tag }}
+          VER: ${{ needs.release-windows.outputs.version }}
         run: |
-          $tag = '${{ steps.version.outputs.tag }}'
-          $ver = '${{ steps.version.outputs.version }}'
-          $file = '${{ steps.artifact.outputs.path }}'
-          $existing = gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $tag already exists  -  uploading asset (clobber)"
-            gh release upload $tag $file --clobber
-          } else {
-            gh release create $tag $file `
-              --title "Parla $ver" `
-              --notes "Automated Windows installer for Parla $ver.`n`nBuilt from commit ${{ github.sha }}."
-          }
+          set -euo pipefail
+          mapfile -t FILES < <(find dist -type f \( -name '*-setup.exe' -o -name '*.dmg' \) | sort)
+          if [ "${#FILES[@]}" -lt 2 ]; then
+            echo "Expected Windows .exe and macOS .dmg in dist/; got: ${FILES[*]-none}"
+            exit 1
+          fi
+          NOTES="$(cat <<EOF
+          Automated builds for Parla ${VER}.
+
+          - **Windows:** run the \`-setup.exe\` installer (per-user, no admin).
+          - **macOS:** open the universal \`.dmg\`, drag Parla to Applications. The build is unsigned; first launch may need **right-click → Open**, or:
+            \`xattr -dr com.apple.quarantine /Applications/Parla.app\`
+          - Grant **Microphone** (and Screen Recording / system audio if prompted) in System Settings if meters stay flat.
+          - In-app update is Windows-only; on Mac install the new DMG from Releases.
+
+          Built from commit ${{ github.sha }}.
+          EOF
+          )"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG already exists  -  uploading assets (clobber)"
+            gh release upload "$TAG" "${FILES[@]}" --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" "${FILES[@]}" \
+              --repo "${{ github.repository }}" \
+              --title "Parla $VER" \
+              --notes "$NOTES"
+          fi
 
   # ── Post-release: bump repo version for the next pull ──────────────────────
   post-bump:
     name: "Post · bump version for next pull"
-    needs: release-build
+    needs: release-publish
     runs-on: windows-latest
     permissions:
       contents: write
@@ -291,7 +380,7 @@ jobs:
   # ── Prune: retain only the latest 2 releases ───────────────────────────────
   prune-releases:
     name: "Post · prune old releases (keep 2)"
-    needs: release-build
+    needs: release-publish
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -22,7 +22,7 @@ pub struct FileSpec {
     pub sha256: Option<String>,
     #[serde(default)]
     pub size: Option<u64>,
-    /// `.zip` files: unpack into the item folder after verification, then delete the archive.
+    /// `.zip` / `.tar.gz`: unpack into the item folder after verification, then delete the archive.
     #[serde(default)]
     pub extract: bool,
 }
@@ -35,6 +35,9 @@ pub struct Item {
     /// "windows", "macos" or "any".
     #[serde(default = "any")]
     pub platform: String,
+    /// Optional CPU arch (`x64` / `arm64`). Missing = any arch on that platform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arch: Option<String>,
     #[serde(default)]
     pub license: String,
     #[serde(default)]
@@ -53,6 +56,13 @@ impl Item {
     pub fn matches_platform(&self, platform: &str) -> bool {
         self.platform == "any" || self.platform == platform
     }
+    /// Missing/empty `arch` matches every CPU. Used so Windows runtimes stay visible without an arch field.
+    pub fn matches_arch(&self, arch: &str) -> bool {
+        match self.arch.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+            None => true,
+            Some(a) => a.eq_ignore_ascii_case(arch),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -69,6 +79,15 @@ pub fn current_platform() -> &'static str {
         "macos"
     } else {
         "linux"
+    }
+}
+
+/// Manifest `arch` values: `x64` / `arm64` (not Rust's `x86_64` / `aarch64` names).
+pub fn current_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
     }
 }
 
@@ -109,7 +128,11 @@ impl Manifest {
     }
 
     pub fn for_slot(&self, slot: Slot, platform: &str) -> Vec<&Item> {
-        self.items.iter().filter(|i| i.slot == slot && i.matches_platform(platform)).collect()
+        self.for_slot_arch(slot, platform, current_arch())
+    }
+
+    pub fn for_slot_arch(&self, slot: Slot, platform: &str, arch: &str) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.slot == slot && i.matches_platform(platform) && i.matches_arch(arch)).collect()
     }
 }
 
@@ -120,25 +143,46 @@ mod tests {
     const GOOD: &str = r#"{"version":1,"items":[
       {"id":"stt-a","slot":"stt","label":"A","files":[{"name":"m.onnx","url":"http://x/m","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size":10}]},
       {"id":"rt-win","slot":"runtime","label":"R","platform":"windows","files":[{"name":"r.zip","url":"http://x/r","extract":true}]},
-      {"id":"rt-mac","slot":"runtime","label":"R","platform":"macos","files":[{"name":"r.zip","url":"http://x/r2","extract":true}]}]}"#;
+      {"id":"rt-mac-arm","slot":"runtime","label":"R","platform":"macos","arch":"arm64","files":[{"name":"r.tgz","url":"http://x/r2","extract":true}]},
+      {"id":"rt-mac-x64","slot":"runtime","label":"R","platform":"macos","arch":"x64","files":[{"name":"r.tgz","url":"http://x/r3","extract":true}]}]}"#;
 
     #[test]
     fn parses_and_filters_by_platform() {
         let m = Manifest::parse(GOOD).unwrap();
-        assert_eq!(m.items.len(), 3);
+        assert_eq!(m.items.len(), 4);
         assert_eq!(m.get("stt-a").unwrap().platform, "any");
         assert_eq!(m.get("stt-a").unwrap().total_bytes(), 10);
-        let rt: Vec<_> = m.for_slot(Slot::Runtime, "windows").iter().map(|i| i.id.as_str()).collect();
+        let rt: Vec<_> = m.for_slot_arch(Slot::Runtime, "windows", "x64").iter().map(|i| i.id.as_str()).collect();
         assert_eq!(rt, ["rt-win"]);
-        assert_eq!(m.for_slot(Slot::Stt, "macos").len(), 1, "'any' matches every platform");
+        assert_eq!(m.for_slot_arch(Slot::Stt, "macos", "arm64").len(), 1, "'any' matches every platform");
+    }
+
+    #[test]
+    fn arch_filter_hides_the_other_mac_runtime() {
+        let m = Manifest::parse(GOOD).unwrap();
+        let arm: Vec<_> = m.for_slot_arch(Slot::Runtime, "macos", "arm64").iter().map(|i| i.id.as_str()).collect();
+        let x64: Vec<_> = m.for_slot_arch(Slot::Runtime, "macos", "x64").iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(arm, ["rt-mac-arm"]);
+        assert_eq!(x64, ["rt-mac-x64"]);
+        assert!(m.get("rt-win").unwrap().matches_arch("arm64"), "missing arch matches every CPU");
     }
 
     #[test]
     fn bundled_manifest_is_complete_pinned_and_matches_the_ids_the_app_uses() {
         let m = Manifest::bundled();
-        for id in [crate::service::ids::STT, crate::service::ids::VAD, crate::service::ids::SPEAKER, "rt-llama-cpp-windows"] {
+        for id in [
+            crate::service::ids::STT,
+            crate::service::ids::VAD,
+            crate::service::ids::SPEAKER,
+            "rt-llama-cpp-windows",
+            "rt-llama-cpp-macos-arm64",
+            "rt-llama-cpp-macos-x64",
+        ] {
             assert!(m.get(id).is_some(), "missing {id}");
         }
+        assert!(m.get("rt-llama-cpp-windows").unwrap().arch.is_none(), "Windows runtime must omit arch");
+        assert_eq!(m.get("rt-llama-cpp-macos-arm64").unwrap().arch.as_deref(), Some("arm64"));
+        assert_eq!(m.get("rt-llama-cpp-macos-x64").unwrap().arch.as_deref(), Some("x64"));
         // every hardware tier must point at an item that exists
         for ram in [8_000, 16_000, 32_000] {
             let r = crate::hardware::recommend(&crate::hardware::HardwareInfo { total_ram_mb: ram, cpu_threads: 8, has_avx2: true });
@@ -150,7 +194,8 @@ mod tests {
                 assert!(f.sha256.is_some() && f.size.is_some(), "{} must be pinned (sha256 + size)", f.name);
             }
         }
-        assert!(m.for_slot(Slot::Runtime, "windows")[0].files[0].extract, "runtime zip must be unpacked");
+        assert!(m.for_slot_arch(Slot::Runtime, "windows", "x64")[0].files[0].extract, "runtime zip must be unpacked");
+        assert!(m.for_slot_arch(Slot::Runtime, "macos", "arm64")[0].files[0].name.ends_with(".tar.gz"));
         assert!(m.items.iter().map(|i| i.total_bytes()).sum::<u64>() < 8_000_000_000);
     }
 

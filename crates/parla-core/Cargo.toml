@@ -22,13 +22,15 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 sha2 = "0.10"
 hex = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+flate2 = "1"
+tar = "0.4"
 whatlang = "0.16"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 dirs = "6"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "isomp4", "ogg", "vorbis", "flac", "wav", "pcm", "mkv", "alac", "adpcm"] }
 rubato = "0.16"
 sherpa-onnx = { version = "*", optional = true }
-cpal = { version = "*", optional = true }
+cpal = { version = "0.18", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

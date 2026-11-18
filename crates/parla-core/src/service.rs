@@ -169,7 +169,7 @@ impl Service {
         self.manifest
             .items
             .iter()
-            .filter(|i| i.matches_platform(current_platform()))
+            .filter(|i| i.matches_platform(current_platform()) && i.matches_arch(crate::models::manifest::current_arch()))
             .map(|i| ModelStatus {
                 id: i.id.clone(),
                 slot: i.slot,
@@ -693,7 +693,7 @@ mod tests {
         let data = vec![7u8; 5000];
         let d2 = data.clone();
         let srv = MockServer::start(move |l| range_reply(&d2, l.range.as_deref()));
-        let item = |id: &str, slot| Item { id: id.into(), slot, label: id.into(), platform: "any".into(), license: "MIT".into(), description: String::new(), files: vec![FileSpec { name: "m.bin".into(), url: format!("{}/m", srv.base), sha256: None, size: Some(5000), extract: false }] };
+        let item = |id: &str, slot| Item { id: id.into(), slot, label: id.into(), platform: "any".into(), arch: None, license: "MIT".into(), description: String::new(), files: vec![FileSpec { name: "m.bin".into(), url: format!("{}/m", srv.base), sha256: None, size: Some(5000), extract: false }] };
         let manifest = Manifest { version: 1, items: vec![item(ids::STT, Slot::Stt), item("mt-hy-mt2-1.8b-q4km", Slot::Translate), item("other", Slot::Summarize)] };
         let (svc, _s, _t) = make(texts(&[]), manifest);
         let st = svc.model_status();
@@ -723,6 +723,7 @@ mod tests {
             slot: Slot::Summarize,
             label: "4B".into(),
             platform: "any".into(),
+            arch: None,
             license: "MIT".into(),
             description: String::new(),
             files: vec![FileSpec { name: "m.bin".into(), url: "http://127.0.0.1/x".into(), sha256: None, size: Some(1), extract: false }],

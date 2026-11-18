@@ -53,12 +53,17 @@ def gh_asset(repo, tag, name):
     return {"name": name, "url": a["browser_download_url"], "sha256": digest, "size": a["size"]}
 
 
-def item(id, slot, label, description, license, files, platform="any"):
-    return {"id": id, "slot": slot, "label": label, "description": description, "license": license, "platform": platform, "files": files}
+def item(id, slot, label, description, license, files, platform="any", arch=None):
+    out = {"id": id, "slot": slot, "label": label, "description": description, "license": license, "platform": platform, "files": files}
+    if arch:
+        out["arch"] = arch
+    return out
 
 
 def main():
     parakeet = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+    llama = f"Language-model runtime - llama.cpp {LLAMA_TAG}"
+    llama_desc = "Runs the translation and summary models on your CPU."
     items = [
         item("stt-parakeet-tdt-0.6b-v3-int8", "stt", "Speech recognition - Parakeet TDT 0.6B v3 (int8)",
              "Transcribes 25 European languages, including Italian, English and French. Runs on the CPU.", "CC-BY-4.0 (NVIDIA)",
@@ -75,9 +80,15 @@ def main():
              "Compact model for 8 GB laptops.", "Apache-2.0 (Alibaba)", [hf_file("unsloth/Qwen3.5-2B-GGUF", "Qwen3.5-2B-Q4_K_M.gguf")]),
         item("sum-qwen3.5-4b-q4km", "summarize", "Summaries - Qwen3.5 4B (Q4_K_M)",
              "Better notes on laptops with 16 GB or more.", "Apache-2.0 (Alibaba)", [hf_file("unsloth/Qwen3.5-4B-GGUF", "Qwen3.5-4B-Q4_K_M.gguf")]),
-        item("rt-llama-cpp-windows", "runtime", f"Language-model runtime - llama.cpp {LLAMA_TAG}",
-             "Runs the translation and summary models on your CPU.", "MIT",
+        # Windows runtime: no arch field (catalogue behaviour unchanged). Mac: one tarball per CPU arch.
+        item("rt-llama-cpp-windows", "runtime", llama, llama_desc, "MIT",
              [dict(gh_asset("ggml-org/llama.cpp", LLAMA_TAG, f"llama-{LLAMA_TAG}-bin-win-cpu-x64.zip"), extract=True)], platform="windows"),
+        item("rt-llama-cpp-macos-arm64", "runtime", llama, llama_desc, "MIT",
+             [dict(gh_asset("ggml-org/llama.cpp", LLAMA_TAG, f"llama-{LLAMA_TAG}-bin-macos-arm64.tar.gz"), extract=True)],
+             platform="macos", arch="arm64"),
+        item("rt-llama-cpp-macos-x64", "runtime", llama, llama_desc, "MIT",
+             [dict(gh_asset("ggml-org/llama.cpp", LLAMA_TAG, f"llama-{LLAMA_TAG}-bin-macos-x64.tar.gz"), extract=True)],
+             platform="macos", arch="x64"),
     ]
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps({"version": 1, "items": items}, indent=2) + "\n")

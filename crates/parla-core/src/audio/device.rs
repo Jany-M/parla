@@ -2,7 +2,7 @@
 //! * Microphone: an input device.
 //! * System audio ("what the other people say"): on Windows (WASAPI) an *output* device opened
 //!   as input is captured in loopback mode — no virtual cable, no per-app integration.
-//!   macOS Core Audio taps are the same call on macOS 14.6+ (deferred D11).
+//!   macOS Core Audio taps are the same call on macOS 14.2+ (bundle min version).
 use super::{AudioSource, MonoResampler, FRAME_SAMPLES};
 use crate::types::{Frame, StreamKind};
 use anyhow::{anyhow, bail, Context, Result};
@@ -98,8 +98,12 @@ impl DeviceSource {
         };
         match (&self.device_id, self.loopback) {
             (Some(id), _) => by_id(id),
-            (None, true) => host.default_output_device().context("no playback device found to capture system audio from"),
-            (None, false) => host.default_input_device().context("no microphone found"),
+            (None, true) => host
+                .default_output_device()
+                .context("no playback device found to capture system audio from (check that speakers/headphones are connected, and on macOS grant Microphone / Screen Recording if prompted)"),
+            (None, false) => host
+                .default_input_device()
+                .context("no microphone found (check that a mic is connected, and on macOS allow Microphone access for Parla in System Settings)"),
         }
     }
 }
@@ -181,7 +185,13 @@ impl AudioSource for DeviceSource {
             SampleFormat::I32 => build::<i32>(&device, cfg, kind, tx2, f2, warmup),
             other => bail!("unsupported audio sample format {other:?}"),
         }
-        .context("starting audio capture")?;
+        .with_context(|| {
+            if self.loopback {
+                "starting system-audio capture (on macOS 14.2+, allow access if the OS prompts; older macOS may not support loopback)"
+            } else {
+                "starting microphone capture"
+            }
+        })?;
         stream.play().context("starting audio capture")?;
         while !stop.load(Ordering::SeqCst) {
             if let Some(e) = failure.lock().unwrap().take() {

@@ -148,6 +148,91 @@ fn extract_zip(zip_path: &Path, into: &Path) -> Result<()> {
     Ok(())
 }
 
+fn safe_archive_rel(name: &str) -> Result<PathBuf> {
+    let p = PathBuf::from(name);
+    anyhow::ensure!(!p.is_absolute() && p.components().all(|c| matches!(c, std::path::Component::Normal(_))), "unsafe path in archive: {name}");
+    Ok(p)
+}
+
+/// Unpacks a `.tar.gz` into `into`, rejecting path escape (tar-slip).
+fn extract_tar_gz(archive: &Path, into: &Path) -> Result<()> {
+    let file = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
+    let dec = flate2::read::GzDecoder::new(file);
+    let mut ar = tar::Archive::new(dec);
+    for entry in ar.entries().context("not a valid tar.gz archive")? {
+        let mut entry = entry?;
+        let name = entry.path().context("bad tar entry path")?.into_owned();
+        let name = name.to_string_lossy();
+        let rel = safe_archive_rel(&name)?;
+        let out = into.join(rel);
+        if entry.header().entry_type().is_dir() {
+            fs::create_dir_all(&out)?;
+        } else {
+            if let Some(p) = out.parent() {
+                fs::create_dir_all(p)?;
+            }
+            let mut dest = File::create(&out)?;
+            std::io::copy(&mut entry, &mut dest)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_llama_executable(dir: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    for walk in walkdir_files(dir) {
+        let p = walk?;
+        if p.file_name().and_then(|n| n.to_str()) == Some("llama-server") {
+            let mut perms = fs::metadata(&p)?.permissions();
+            perms.set_mode(perms.mode() | 0o755);
+            fs::set_permissions(&p, perms)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn walkdir_files(dir: &Path) -> Vec<Result<PathBuf>> {
+    fn rec(dir: &Path, out: &mut Vec<Result<PathBuf>>) {
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(e) => {
+                out.push(Err(e.into()));
+                return;
+            }
+        };
+        for e in entries {
+            match e {
+                Ok(e) => {
+                    let p = e.path();
+                    if p.is_dir() {
+                        rec(&p, out);
+                    } else {
+                        out.push(Ok(p));
+                    }
+                }
+                Err(err) => out.push(Err(err.into())),
+            }
+        }
+    }
+    let mut out = Vec::new();
+    rec(dir, &mut out);
+    out
+}
+
+fn extract_archive(path: &Path, into: &Path) -> Result<()> {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+        extract_tar_gz(path, into)?;
+    } else {
+        extract_zip(path, into)?;
+    }
+    #[cfg(unix)]
+    ensure_llama_executable(into)?;
+    Ok(())
+}
+
 /// Installs every file of `item` into `models_dir/<id>/`. Resumable; idempotent when already
 /// installed. `progress(done_bytes, total_bytes)` where total is 0 if sizes are unknown.
 pub fn install_item(models_dir: &Path, item: &Item, cancel: &Cancel, progress: &mut dyn FnMut(u64, u64)) -> Result<PathBuf> {
@@ -164,7 +249,7 @@ pub fn install_item(models_dir: &Path, item: &Item, cancel: &Cancel, progress: &
         fetch(&http, spec, &dest, cancel, &mut |d| progress(base + d, total))?;
         base += fs::metadata(&dest)?.len();
         if spec.extract {
-            extract_zip(&dest, &dir)?;
+            extract_archive(&dest, &dir)?;
             fs::remove_file(&dest)?;
         }
     }
@@ -183,7 +268,7 @@ mod tests {
     }
 
     fn item(id: &str, files: Vec<FileSpec>) -> Item {
-        Item { id: id.into(), slot: Slot::Stt, label: id.into(), platform: "any".into(), license: String::new(), description: String::new(), files }
+        Item { id: id.into(), slot: Slot::Stt, label: id.into(), platform: "any".into(), arch: None, license: String::new(), description: String::new(), files }
     }
 
     fn spec(base: &str, name: &str, data: &[u8]) -> FileSpec {
@@ -327,6 +412,45 @@ mod tests {
         let dir = install_item(t.path(), &item("rt", vec![s]), &Cancel::default(), &mut |_, _| {}).unwrap();
         assert_eq!(fs::read(dir.join("bin/llama-server.exe")).unwrap(), b"EXE");
         assert!(!dir.join("rt.zip").exists());
+    }
+
+    fn make_tar_gz(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut raw);
+            for (name, body) in entries {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(body.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                builder.append_data(&mut header, *name, *body).unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let mut out = Vec::new();
+        let mut enc = flate2::write::GzEncoder::new(&mut out, flate2::Compression::fast());
+        enc.write_all(&raw).unwrap();
+        enc.finish().unwrap();
+        out
+    }
+
+    #[test]
+    fn tar_gz_archives_are_extracted_and_the_archive_removed() {
+        let z = make_tar_gz(&[("llama-b/llama-server", b"BIN"), ("llama-b/readme.txt", b"hi")]);
+        let srv = serve(vec![("rt.tar.gz", z.clone())]);
+        let t = tempfile::tempdir().unwrap();
+        let mut s = spec(&srv.base, "rt.tar.gz", &z);
+        s.extract = true;
+        let dir = install_item(t.path(), &item("rt-mac", vec![s]), &Cancel::default(), &mut |_, _| {}).unwrap();
+        assert_eq!(fs::read(dir.join("llama-b/llama-server")).unwrap(), b"BIN");
+        assert!(!dir.join("rt.tar.gz").exists());
+    }
+
+    #[test]
+    fn archive_relative_paths_reject_escape() {
+        assert!(safe_archive_rel("../evil.txt").is_err());
+        assert!(safe_archive_rel("/abs/evil.txt").is_err());
+        assert!(safe_archive_rel("llama-b/llama-server").is_ok());
     }
 
     #[test]

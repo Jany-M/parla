@@ -158,6 +158,11 @@ mod tests {
                 size: 10,
             },
             GhAsset {
+                name: "Parla_0.1.3_universal.dmg".into(),
+                browser_download_url: "https://example/parla.dmg".into(),
+                size: 8_000_000,
+            },
+            GhAsset {
                 name: "Parla_0.1.2_x64-setup.exe".into(),
                 browser_download_url: "https://example/setup.exe".into(),
                 size: 9_000_000,

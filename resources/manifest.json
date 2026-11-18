@@ -131,6 +131,42 @@
           "extract": true
         }
       ]
+    },
+    {
+      "id": "rt-llama-cpp-macos-arm64",
+      "slot": "runtime",
+      "label": "Language-model runtime - llama.cpp b12438",
+      "description": "Runs the translation and summary models on your CPU.",
+      "license": "MIT",
+      "platform": "macos",
+      "files": [
+        {
+          "name": "llama-b12438-bin-macos-arm64.tar.gz",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12438/llama-b12438-bin-macos-arm64.tar.gz",
+          "sha256": "9ba4c834da156d08d6d81438c479c337b20cb723d7639164e602d93811a9f49b",
+          "size": 17011862,
+          "extract": true
+        }
+      ],
+      "arch": "arm64"
+    },
+    {
+      "id": "rt-llama-cpp-macos-x64",
+      "slot": "runtime",
+      "label": "Language-model runtime - llama.cpp b12438",
+      "description": "Runs the translation and summary models on your CPU.",
+      "license": "MIT",
+      "platform": "macos",
+      "files": [
+        {
+          "name": "llama-b12438-bin-macos-x64.tar.gz",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12438/llama-b12438-bin-macos-x64.tar.gz",
+          "sha256": "2dd6e22e57812fb92a655dec3651a9de7bedbba03cc46b9bb68ac521ad06d0a0",
+          "size": 12769119,
+          "extract": true
+        }
+      ],
+      "arch": "x64"
     }
   ]
 }
