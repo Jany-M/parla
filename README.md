@@ -22,7 +22,7 @@ Local AI/LLMs only (max privacy), no accounts, no subscriptions, no cloud, no hi
 
 <img width="2874" height="1995" alt="screenshot_recording" src="https://github.com/user-attachments/assets/2a79146c-2f8f-44d9-bd01-d325ef5d921b" />
 
-<img width="3822" height="1209" alt="screenshot_library" src="https://github.com/user-attachments/assets/88f27b9c-91b9-4207-83c7-d0278b7ab9b7" />
+<img width="3822" height="1209" alt="screenshot_library" src="https://github.com/user-attachments/assets/88f27b9c-91b9-4207-83c7-d0278d7ab9b7" />
 
 ## Requirements
 
