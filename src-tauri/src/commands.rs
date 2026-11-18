@@ -1,5 +1,6 @@
 //! Thin command layer: every command forwards to `parla_core::service::Service`.
 use crate::state::AppState;
+#[cfg(windows)]
 use anyhow::Context;
 use parla_core::audio::device::{list_inputs, list_outputs, DeviceInfo};
 use parla_core::models::Cancel;
@@ -337,6 +338,7 @@ pub struct UpdateInfoDto {
     pub auto_install: bool,
 }
 
+#[cfg(windows)]
 #[derive(Serialize, Clone)]
 struct UpdateProgress {
     done: u64,

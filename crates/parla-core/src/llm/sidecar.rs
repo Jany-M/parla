@@ -90,7 +90,7 @@ fn path_under_dir(path: &Path, dir: &Path) -> bool {
 }
 
 /// Strip the ` (deleted)` suffix Linux adds to `/proc/pid/exe` when the file was replaced.
-#[cfg(any(target_os = "linux", all(test, unix)))]
+#[cfg(target_os = "linux")]
 fn strip_deleted_suffix(path: PathBuf) -> PathBuf {
     const DELETED: &[u8] = b" (deleted)";
     let Some(name) = path.file_name() else { return path };
