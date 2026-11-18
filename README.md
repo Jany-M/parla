@@ -68,7 +68,7 @@ Open the universal `.dmg` and drag Parla to Applications. Builds are **unsigned*
 .\scripts\build.ps1 -TestsOnly   # tests only
 ```
 
-Prerequisites are checked by the script (Rust MSVC, Node 22+, VS Build Tools C++ workload).
+Missing Rust, Node.js, or VS C++ Build Tools are installed automatically via winget when possible.
 
 ### macOS DMG (must run on a Mac)
 
@@ -78,7 +78,7 @@ chmod +x ./scripts/build-macos.sh
 ./scripts/build-macos.sh --skip-tests    # faster
 ```
 
-Needs Xcode Command Line Tools, Rust stable, and Node 22+. The script refuses to run on non-Darwin hosts. CI builds the same universal target on `macos-latest`.
+Missing Rust (rustup), Node.js 22+ (Homebrew), or Xcode Command Line Tools are installed automatically when possible. The script refuses to run on non-Darwin hosts. CI builds the same universal target on `macos-latest`.
 
 ## Tests
 
