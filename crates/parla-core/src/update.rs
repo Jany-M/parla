@@ -59,7 +59,9 @@ fn pick_windows_installer(assets: &[GhAsset]) -> Option<&GhAsset> {
 fn http_client(user_agent: &str) -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .user_agent(user_agent)
-        .timeout(std::time::Duration::from_secs(60))
+        // Installers are ~10 MB; allow slow links without aborting mid-download.
+        .timeout(std::time::Duration::from_secs(60 * 10))
+        .connect_timeout(std::time::Duration::from_secs(30))
         .build()
         .context("building HTTP client")
 }
