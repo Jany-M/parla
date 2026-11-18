@@ -153,7 +153,7 @@ describe("updates", () => {
   it("shows an update button below the version row and installs on click", async () => {
     mock = createMockApi({
       installed: true,
-      update: { version: "0.2.0", tag: "v0.2.0", asset_name: "Parla_0.2.0_x64-setup.exe", size: 1_000_000 },
+      update: { version: "0.2.0", tag: "v0.2.0", asset_name: "Parla_0.2.0_x64-setup.exe", size: 1_000_000, auto_install: true },
     });
     setApi(mock);
     await ready();
@@ -162,6 +162,19 @@ describe("updates", () => {
     expect(logs.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await userEvent.click(btn);
     await waitFor(() => expect(mock.calls).toContain("installUpdate"));
+  });
+
+  it("opens Releases when auto_install is false (macOS path)", async () => {
+    mock = createMockApi({
+      installed: true,
+      update: { version: "0.2.0", tag: "v0.2.0", asset_name: "Parla_0.2.0_universal.dmg", size: 1_000_000, auto_install: false },
+    });
+    setApi(mock);
+    await ready();
+    const btn = await screen.findByRole("button", { name: /download v0\.2\.0/i });
+    await userEvent.click(btn);
+    await waitFor(() => expect(mock.calls.some((c) => c.startsWith("openUrl:"))).toBe(true));
+    expect(mock.calls).not.toContain("installUpdate");
   });
 
   it("hides the update button when already current", async () => {

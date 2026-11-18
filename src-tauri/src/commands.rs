@@ -333,6 +333,8 @@ pub struct UpdateInfoDto {
     pub tag: String,
     pub asset_name: String,
     pub size: u64,
+    /// True only on Windows when a `-setup.exe` asset exists. macOS opens the Releases page instead.
+    pub auto_install: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -341,32 +343,47 @@ struct UpdateProgress {
     total: u64,
 }
 
+fn update_dto(u: parla_core::update::UpdateInfo) -> UpdateInfoDto {
+    let auto_install = cfg!(windows) && u.asset_name.to_ascii_lowercase().ends_with("-setup.exe");
+    UpdateInfoDto {
+        version: u.version,
+        tag: u.tag,
+        asset_name: u.asset_name,
+        size: u.size,
+        auto_install,
+    }
+}
+
 /// Compares the running version to https://github.com/Jany-M/parla/releases/latest.
 #[tauri::command]
 pub async fn check_for_update(app: AppHandle) -> Res<Option<UpdateInfoDto>> {
     let current = app.package_info().version.to_string();
-    blocking(move || {
-        Ok(parla_core::update::check_latest(&current)?.map(|u| UpdateInfoDto {
-            version: u.version,
-            tag: u.tag,
-            asset_name: u.asset_name,
-            size: u.size,
-        }))
+    blocking(move || match parla_core::update::check_latest(&current) {
+        Ok(v) => Ok(v.map(update_dto)),
+        Err(e) => {
+            log::warn!("update check failed: {e:#}");
+            Err(e)
+        }
     })
     .await
 }
 
-/// Download the latest Windows installer, stop Parla services, run a silent install, restart.
+/// Windows: download the NSIS installer and apply it after exit.
+/// macOS: open the GitHub Releases page (unsigned DMG; no silent in-app install).
 #[tauri::command]
 pub async fn install_update(app: AppHandle, s: State<'_, AppState>) -> Res<()> {
     #[cfg(not(windows))]
     {
-        let _ = (app, s);
-        return Err("Automatic updates are only available on Windows".into());
+        let _ = s;
+        log::info!("update: opening Releases page (no silent installer on this OS)");
+        open_url(parla_core::update::RELEASES_LATEST_URL.to_string())?;
+        let _ = app;
+        return Ok(());
     }
     #[cfg(windows)]
     {
         let current = app.package_info().version.to_string();
+        let logs_dir = s.svc.paths.logs_dir();
         let svc = s.svc.clone();
         s.install_cancel.lock().unwrap().cancel();
         s.import_cancel.lock().unwrap().store(true, Ordering::SeqCst);
@@ -375,20 +392,37 @@ pub async fn install_update(app: AppHandle, s: State<'_, AppState>) -> Res<()> {
         let installer = blocking(move || {
             let info = parla_core::update::check_latest(&current)?
                 .ok_or_else(|| anyhow::anyhow!("no newer release is available"))?;
+            if !info.asset_name.to_ascii_lowercase().ends_with("-setup.exe") {
+                anyhow::bail!(
+                    "latest release has no Windows installer yet; download from {}",
+                    parla_core::update::RELEASES_LATEST_URL
+                );
+            }
             let dir = std::env::temp_dir().join("parla-update");
             parla_core::update::download_installer(&info, &dir, &mut |done, total| {
                 let _ = app_for_progress.emit("update-progress", UpdateProgress { done, total });
             })
         })
-        .await?;
+        .await
+        .map_err(|e| {
+            log::error!("update install failed before helper: {e}");
+            e
+        })?;
 
         // Stop recording / translation and any leftover llama-server before files are replaced.
         let _ = svc.stop_live();
         parla_core::llm::kill_stale(&svc.paths.models_dir());
 
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        spawn_windows_updater(installer, exe).map_err(err)?;
-        log::info!("update installer launched; exiting so files can be replaced");
+        log::info!(
+            "update: spawning helper for {} -> {}; helper log {}",
+            installer.display(),
+            exe.display(),
+            logs_dir.join(parla_core::update::UPDATE_HELPER_LOG).display()
+        );
+        spawn_windows_updater(installer, exe, logs_dir).map_err(err)?;
+        log::info!("update helper started; exiting so files can be replaced");
+        log::logger().flush();
         app.exit(0);
         Ok(())
     }
@@ -405,7 +439,7 @@ fn ps_quote(path: &std::path::Path) -> String {
 /// Tauri NSIS flags: `/S` silent, `/UPDATE` keeps app data (hooks.nsh), `/R` relaunches the app.
 /// The helper must break out of Parla's Windows job object or it is killed when we `app.exit`.
 #[cfg(windows)]
-fn spawn_windows_updater(installer: PathBuf, app_exe: PathBuf) -> anyhow::Result<()> {
+fn spawn_windows_updater(installer: PathBuf, app_exe: PathBuf, logs_dir: PathBuf) -> anyhow::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -414,7 +448,8 @@ fn spawn_windows_updater(installer: PathBuf, app_exe: PathBuf) -> anyhow::Result
 
     let pid = std::process::id();
     let script = std::env::temp_dir().join(format!("parla-apply-update-{pid}.ps1"));
-    let log = std::env::temp_dir().join("parla-update.log");
+    std::fs::create_dir_all(&logs_dir).context("creating logs dir for update helper")?;
+    let log = logs_dir.join(parla_core::update::UPDATE_HELPER_LOG);
     let app_dir = app_exe.parent().unwrap_or(app_exe.as_path()).to_path_buf();
     // `/S /UPDATE /R`: silent upgrade without wiping %LOCALAPPDATA%\Parla, then restart.
     let body = format!(
@@ -437,7 +472,11 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
   }}
 Start-Sleep -Seconds 1
 $setup = '{setup}'
-Write-Log ("running installer: {{0}}" -f $setup)
+if (-not (Test-Path -LiteralPath $setup)) {{
+  Write-Log ("installer missing: {{0}}" -f $setup)
+  exit 2
+}}
+Write-Log ("running installer: {{0}} /S /UPDATE /R" -f $setup)
 $p = Start-Process -FilePath $setup -ArgumentList '/S','/UPDATE','/R' -PassThru -Wait
 $code = if ($null -eq $p.ExitCode) {{ 'null' }} else {{ [string]$p.ExitCode }}
 Write-Log ("installer exit code: {{0}}" -f $code)
@@ -448,6 +487,10 @@ $running = Get-Process -Name 'parla' -ErrorAction SilentlyContinue
 if (-not $running -and (Test-Path -LiteralPath $app)) {{
   Write-Log 'relaunching app (installer /R did not)'
   Start-Process -FilePath $app
+}} elseif ($running) {{
+  Write-Log 'parla already running after installer'
+}} else {{
+  Write-Log ("app binary missing after install: {{0}}" -f $app)
 }}
 Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 Write-Log 'done'
@@ -477,11 +520,14 @@ Write-Log 'done'
     let flags = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB;
     cmd.creation_flags(flags);
     match cmd.spawn() {
-        Ok(_) => Ok(()),
+        Ok(child) => {
+            log::info!("update helper pid={}", child.id());
+            Ok(())
+        }
         Err(e) => {
             log::warn!("update helper with BREAKAWAY failed ({e}); retrying without it");
             let mut retry = std::process::Command::new("powershell");
-            retry
+            let child = retry
                 .args([
                     "-NoProfile",
                     "-ExecutionPolicy",
@@ -497,6 +543,7 @@ Write-Log 'done'
                 .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
                 .spawn()
                 .context("starting update helper")?;
+            log::info!("update helper pid={} (no breakaway)", child.id());
             Ok(())
         }
     }

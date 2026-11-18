@@ -27,7 +27,10 @@ function SidebarFooter({ version }: { version: string }) {
     void api()
       .checkForUpdate()
       .then(setUpdate)
-      .catch(() => setUpdate(null));
+      .catch((e) => {
+        setUpdate(null);
+        void api().logUiError(`update check failed: ${String(e)}`);
+      });
   }, []);
 
   useEffect(() => {
@@ -52,7 +55,9 @@ function SidebarFooter({ version }: { version: string }) {
       ? `Updating… ${pct}%`
       : "Updating…"
     : update
-      ? `Update to v${update.version}`
+      ? update.auto_install
+        ? `Update to v${update.version}`
+        : `Download v${update.version}`
       : null;
 
   const link = "cursor-pointer underline decoration-dotted hover:text-slate-100";
@@ -102,15 +107,29 @@ function SidebarFooter({ version }: { version: string }) {
             type="button"
             disabled={busy}
             onClick={() => {
+              if (!update) return;
               setBusy(true);
               setError(null);
               setPct(null);
+              if (!update.auto_install) {
+                // macOS (and any build without a silent installer): open Releases; DMG is manual.
+                void api()
+                  .openUrl("https://github.com/Jany-M/parla/releases/latest")
+                  .then(() => setBusy(false))
+                  .catch((e) => {
+                    setBusy(false);
+                    setError(String(e));
+                    void api().logUiError(`open releases failed: ${String(e)}`);
+                  });
+                return;
+              }
               void api()
                 .installUpdate()
                 .catch((e) => {
                   setBusy(false);
                   setPct(null);
                   setError(String(e));
+                  void api().logUiError(`install update failed: ${String(e)}`);
                 });
             }}
             className="w-full rounded-lg bg-accent/20 px-3 py-2 text-left text-xs font-medium text-accent hover:bg-accent/30 disabled:opacity-60"

@@ -89,6 +89,8 @@ fn main() {
             paths.ensure_dirs()?;
             let _ = FileLogger::init(&paths.logs_dir());
             log::info!("Parla {} starting, data in {}", env!("CARGO_PKG_VERSION"), paths.root.display());
+            // Surface the last Windows update-helper run (logs/update.log) into parla.log.
+            parla_core::update::absorb_helper_log(&paths.logs_dir());
             std::panic::set_hook(Box::new(|info| log::error!("panic: {info}\n{}", std::backtrace::Backtrace::force_capture())));
             #[cfg(windows)]
             // SAFETY: registers a plain function; it only logs.

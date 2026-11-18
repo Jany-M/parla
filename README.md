@@ -56,7 +56,7 @@ Open the universal `.dmg` and drag Parla to Applications. Builds are **unsigned*
    `xattr -dr com.apple.quarantine /Applications/Parla.app`
 2. Grant **Microphone** in System Settings if the mic meter stays flat. For system audio (what other apps play), allow Screen Recording / system audio if macOS prompts.
 3. Data lives in `~/Library/Application Support/Parla`.
-4. In-app update is Windows-only; install a newer DMG from Releases when you want to upgrade.
+4. In-app update is Windows-only (silent NSIS). On Mac the app opens the Releases page so you can install the new DMG; Gatekeeper steps above still apply. Update helper details land in `logs/update.log` (Open logs).
 
 ## Build
 

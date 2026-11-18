@@ -1,12 +1,15 @@
 //! Check GitHub Releases for a newer Windows installer and download it.
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const GITHUB_REPO: &str = "Jany-M/parla";
+pub const RELEASES_LATEST_URL: &str = "https://github.com/Jany-M/parla/releases/latest";
 const LATEST_API: &str = "https://api.github.com/repos/Jany-M/parla/releases/latest";
+/// Written by the Windows update helper under the app logs folder (`logs/update.log`).
+pub const UPDATE_HELPER_LOG: &str = "update.log";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateInfo {
@@ -68,6 +71,7 @@ fn http_client(user_agent: &str) -> Result<reqwest::blocking::Client> {
 
 /// Returns `Ok(Some(..))` when GitHub's latest release is newer than `current_version`.
 pub fn check_latest(current_version: &str) -> Result<Option<UpdateInfo>> {
+    log::info!("update check: current={current_version}");
     let ua = format!("Parla/{current_version} (+https://github.com/{GITHUB_REPO})");
     let client = http_client(&ua)?;
     let release: GhRelease = client
@@ -81,12 +85,28 @@ pub fn check_latest(current_version: &str) -> Result<Option<UpdateInfo>> {
         .context("reading GitHub Releases JSON")?;
 
     if !is_newer(&release.tag_name, current_version) {
+        log::info!("update check: already current (latest={})", release.tag_name);
         return Ok(None);
     }
     let Some(asset) = pick_windows_installer(&release.assets) else {
-        bail!("latest release {} has no Windows installer asset", release.tag_name);
+        // Still report a newer tag so macOS can open the Releases page even though there is no .exe.
+        let version = release.tag_name.trim().trim_start_matches('v').to_string();
+        log::info!("update check: newer {} but no Windows -setup.exe (dmg-only or assets pending)", release.tag_name);
+        return Ok(Some(UpdateInfo {
+            version,
+            tag: release.tag_name,
+            asset_name: String::new(),
+            download_url: RELEASES_LATEST_URL.into(),
+            size: 0,
+        }));
     };
     let version = release.tag_name.trim().trim_start_matches('v').to_string();
+    log::info!(
+        "update check: available {} asset={} size={}",
+        release.tag_name,
+        asset.name,
+        asset.size
+    );
     Ok(Some(UpdateInfo {
         version,
         tag: release.tag_name,
@@ -96,11 +116,28 @@ pub fn check_latest(current_version: &str) -> Result<Option<UpdateInfo>> {
     }))
 }
 
+/// On next launch, surface the last Windows update-helper lines into `parla.log`.
+pub fn absorb_helper_log(logs_dir: &Path) {
+    let path = logs_dir.join(UPDATE_HELPER_LOG);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    if text.trim().is_empty() {
+        return;
+    }
+    let tail: Vec<&str> = text.lines().rev().take(30).collect();
+    let tail: Vec<&str> = tail.into_iter().rev().collect();
+    log::info!("previous update helper log ({}):\n{}", path.display(), tail.join("\n"));
+}
+
 /// Download `info` to `dest_dir`/`info.asset_name`. `progress(done, total)`.
 pub fn download_installer(info: &UpdateInfo, dest_dir: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<PathBuf> {
+    anyhow::ensure!(!info.asset_name.is_empty(), "no Windows installer asset to download");
+    anyhow::ensure!(info.download_url.contains("://"), "invalid installer download URL");
     std::fs::create_dir_all(dest_dir).context("creating update download folder")?;
     let dest = dest_dir.join(&info.asset_name);
     let part = dest.with_extension("exe.part");
+    log::info!("update download: {} -> {}", info.download_url, dest.display());
 
     let ua = format!("Parla/{} (+https://github.com/{GITHUB_REPO})", info.version);
     let client = http_client(&ua)?;
@@ -129,6 +166,7 @@ pub fn download_installer(info: &UpdateInfo, dest_dir: &Path, progress: &mut dyn
     drop(file);
     std::fs::rename(&part, &dest).with_context(|| format!("finalizing {}", dest.display()))?;
     progress(total, total);
+    log::info!("update download complete: {} ({} bytes)", dest.display(), done);
     Ok(dest)
 }
 
@@ -172,5 +210,13 @@ mod tests {
         ];
         let a = pick_windows_installer(&assets).unwrap();
         assert_eq!(a.name, "Parla_0.1.2_x64-setup.exe");
+    }
+
+    #[test]
+    fn absorb_helper_log_is_a_noop_when_missing() {
+        let t = tempfile::tempdir().unwrap();
+        absorb_helper_log(t.path()); // must not panic
+        std::fs::write(t.path().join(UPDATE_HELPER_LOG), "2026-01-01T00:00:00Z done\n").unwrap();
+        absorb_helper_log(t.path());
     }
 }

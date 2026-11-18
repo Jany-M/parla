@@ -53,11 +53,13 @@ export interface SystemInfo {
 }
 export interface AppInfo { version: string; system: SystemInfo }
 
-/** Newer GitHub Release available for this install (Windows installer). */
+/** Newer GitHub Release available for this install. */
 export interface UpdateInfo {
   version: string;
   tag: string;
   asset_name: string;
   size: number;
+  /** Windows silent NSIS install. On macOS this is false: open the Releases page instead. */
+  auto_install: boolean;
 }
 export interface UpdateProgress { done: number; total: number }
