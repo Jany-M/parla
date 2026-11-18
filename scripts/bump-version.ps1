@@ -62,6 +62,26 @@ function Write-Versions([string]$from, [string]$to) {
   [System.IO.File]::WriteAllText($cargoPath, $cargo2, $utf8)
   [System.IO.File]::WriteAllText($pkgPath, $pkg2, $utf8)
   [System.IO.File]::WriteAllText($tauriPath, $tauri2, $utf8)
+
+  # Keep Cargo.lock workspace package versions aligned (no dependency bumps).
+  Sync-CargoLockVersions -from $from -to $to
+}
+
+function Sync-CargoLockVersions([string]$from, [string]$to) {
+  $lockPath = Join-Path $root 'Cargo.lock'
+  if (-not (Test-Path $lockPath)) { return }
+  $lock = Get-Content $lockPath -Raw
+  # Only the path crates we publish as the app (avoid touching unrelated crates named similarly).
+  foreach ($name in @('parla', 'parla-core')) {
+    $pattern = '(?m)(^name = "' + [regex]::Escape($name) + '"\r?\nversion = ")' + [regex]::Escape($from) + '(")'
+    $lock2 = [regex]::Replace($lock, $pattern, ('${1}' + $to + '${2}'), 1)
+    if ($lock2 -eq $lock) {
+      Write-Warning "Cargo.lock had no version $from for $name (already synced?)"
+    }
+    $lock = $lock2
+  }
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  [System.IO.File]::WriteAllText($lockPath, $lock, $utf8)
 }
 
 $cur = Read-CurrentVersion
