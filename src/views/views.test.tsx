@@ -219,6 +219,14 @@ describe("settings", () => {
     await userEvent.click(await screen.findByRole("button", { name: /delete all my data/i }));
     expect(mock.calls).not.toContain("deleteAllData");
   });
+  it("can switch the app language", async () => {
+    await ready();
+    await openSettings();
+    await userEvent.selectOptions(await screen.findByLabelText(/app language/i), "it");
+    await waitFor(() => expect(mock.calls).toContain("saveSettings"));
+    expect(await screen.findByRole("heading", { name: /^impostazioni$/i })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: /principale/i })).toBeInTheDocument();
+  });
   it("hides the 4B summary download on low-RAM machines", async () => {
     mock = createMockApi({ installed: false, ramMb: 8000 });
     setApi(mock);

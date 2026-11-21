@@ -29,7 +29,8 @@ export type SlotChoice =
 export interface Settings {
   slots: { stt: SlotChoice; speaker: SlotChoice; translate: SlotChoice; summarize: SlotChoice };
   target_lang: string; mic_device: string | null; system_device: string | null;
-  echo_guard: boolean; onboarding_done: boolean; overlay_font_px: number; overlay_opacity: number; summary_lang: string;
+  echo_guard: boolean; onboarding_done: boolean; overlay_font_px: number; overlay_opacity: number;
+  summary_lang: string; /** App chrome language (en / it / fr). */ ui_lang: string;
 }
 
 export type ModelSlot = "stt" | "vad" | "speaker" | "translate" | "summarize" | "runtime";

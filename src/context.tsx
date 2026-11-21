@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { I18nProvider, resolveUiLang, translate } from "./i18n";
 import { api } from "./lib/api";
 import type { AppInfo, Lang, ModelStatus, Settings } from "./lib/types";
 
@@ -22,6 +23,7 @@ export const useApp = () => {
 export function AppProvider({ children }: { children: (ctx: AppCtx) => ReactNode }) {
   const [state, setState] = useState<{ settings: Settings; models: ModelStatus[]; languages: Lang[]; info: AppInfo } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const bootLang = resolveUiLang(typeof navigator !== "undefined" ? navigator.language : "en");
 
   useEffect(() => {
     const a = api();
@@ -43,8 +45,16 @@ export function AppProvider({ children }: { children: (ctx: AppCtx) => ReactNode
     setState((s) => (s ? { ...s, info } : s));
   }, []);
 
-  if (error) return <div className="p-8 text-red-300">Parla could not start: {error}</div>;
-  if (!state) return <div className="grid h-full place-items-center text-mute">Loading…</div>;
+  if (error) {
+    return <div className="p-8 text-red-300">{translate(bootLang, "shell.startFailed", { error })}</div>;
+  }
+  if (!state) {
+    return <div className="grid h-full place-items-center text-mute">{translate(bootLang, "shell.loading")}</div>;
+  }
   const ctx: AppCtx = { ...state, save, refreshModels, refreshInfo };
-  return <Ctx.Provider value={ctx}>{children(ctx)}</Ctx.Provider>;
+  return (
+    <I18nProvider lang={state.settings.ui_lang}>
+      <Ctx.Provider value={ctx}>{children(ctx)}</Ctx.Provider>
+    </I18nProvider>
+  );
 }

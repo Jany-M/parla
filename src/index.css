@@ -4,8 +4,9 @@
   --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   --color-ink: #0b0d12;
   --color-panel: #12151c;
-  --color-raised: #1a1e28;
-  --color-line: #262b38;
+  /* Raised surfaces (inputs, selects, secondary buttons) must clear panel/ink on dark UI. */
+  --color-raised: #2a3142;
+  --color-line: #4a5368;
   --color-mute: #8b93a7;
   --color-accent: #818cf8;
   --color-accent-strong: #6366f1;
@@ -16,6 +17,27 @@ body { margin: 0; background: var(--color-ink); color: #e6e9f2; font-family: var
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #2b3040; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
 select, input, textarea { color-scheme: dark; }
+input[type="range"] { accent-color: var(--color-accent); width: 100%; }
+input[type="checkbox"]:not(.sr-only) {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 0.25rem;
+  background: var(--color-raised);
+  vertical-align: middle;
+}
+input[type="checkbox"]:not(.sr-only):checked {
+  background: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 8.5l3 3 6-7' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+input[type="checkbox"]:not(.sr-only):disabled {
+  opacity: 0.5;
+}
 
 /* the translation overlay window is transparent: the page itself must not paint a background */
 body.overlay-body { background: transparent; }

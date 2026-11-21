@@ -12,8 +12,8 @@ export function formatClock(secs: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export function formatDuration(startedAt: number, endedAt: number | null): string {
-  return endedAt ? formatClock(endedAt - startedAt) : "recording…";
+export function formatDuration(startedAt: number, endedAt: number | null, recordingLabel = "recording…"): string {
+  return endedAt ? formatClock(endedAt - startedAt) : recordingLabel;
 }
 
 /** Unix seconds → local date and time. */

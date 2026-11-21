@@ -37,6 +37,33 @@ pub fn by_code(code: &str) -> Option<&'static Language> {
     LANGUAGES.iter().find(|l| l.code.eq_ignore_ascii_case(code))
 }
 
+/// Map an OS/BCP-47 tag (`it-IT`, `en_US`, `pt-BR`) to a supported language code.
+pub fn code_from_locale_tag(tag: &str) -> Option<&'static str> {
+    let primary = tag.split(['-', '_']).next().unwrap_or(tag).trim();
+    by_code(primary).map(|l| l.code)
+}
+
+/// Preferred content language (translate / summarize targets) from the OS locale. Falls back to English.
+pub fn system_language_code() -> &'static str {
+    sys_locale::get_locale()
+        .as_deref()
+        .and_then(code_from_locale_tag)
+        .unwrap_or("en")
+}
+
+/// UI locales we ship string catalogs for.
+pub const UI_LANGUAGE_CODES: &[&str] = &["en", "it", "fr"];
+
+/// App chrome language from the OS, restricted to shipped UI catalogs.
+pub fn system_ui_language_code() -> &'static str {
+    let code = system_language_code();
+    if UI_LANGUAGE_CODES.iter().any(|c| *c == code) {
+        code
+    } else {
+        "en"
+    }
+}
+
 /// Detection restricted to the supported set. Accepts whatlang's "reliable" verdict, or a
 /// confident one on text long enough to mean something; `None` for short/ambiguous text.
 pub fn detect(text: &str) -> Option<&'static str> {
@@ -62,6 +89,17 @@ mod tests {
     fn lookup_is_case_insensitive() {
         assert_eq!(by_code("IT").unwrap().name, "Italian");
         assert!(by_code("xx").is_none());
+    }
+
+    #[test]
+    fn locale_tags_map_to_supported_codes() {
+        assert_eq!(code_from_locale_tag("it-IT"), Some("it"));
+        assert_eq!(code_from_locale_tag("en_US"), Some("en"));
+        assert_eq!(code_from_locale_tag("pt-BR"), Some("pt"));
+        assert_eq!(code_from_locale_tag("de"), Some("de"));
+        assert_eq!(code_from_locale_tag("zh-CN"), None);
+        assert_eq!(system_language_code().len(), 2);
+        assert!(UI_LANGUAGE_CODES.contains(&system_ui_language_code()));
     }
 
     #[test]

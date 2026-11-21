@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Banner, Button, Card, LevelMeter, Select } from "../components/ui";
 import { Transcript } from "../components/Transcript";
 import { useApp } from "../context";
+import { useT } from "../i18n";
 import { api } from "../lib/api";
 import { emptyLive, reduceLive, unknownSpeakers } from "../lib/live";
 import { featureItems, missing } from "../lib/models";
@@ -10,6 +11,7 @@ import type { Speaker } from "../lib/types";
 
 export function Record({ goTo }: { goTo: (v: "library" | "settings") => void }) {
   const { settings, models, languages, save } = useApp();
+  const t = useT();
   const [live, dispatch] = useReducer(reduceLive, undefined, emptyLive);
   const [meetingId, setMeetingId] = useState<number | null>(null);
   const [savedId, setSavedId] = useState<number | null>(null);
@@ -71,8 +73,8 @@ export function Record({ goTo }: { goTo: (v: "library" | "settings") => void }) 
 
   useEffect(() => {
     if (!starting) return;
-    const t = window.setInterval(() => tick((n) => n + 1), 250);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => tick((n) => n + 1), 250);
+    return () => window.clearInterval(timer);
   }, [starting]);
 
   const start = async () => {
@@ -146,60 +148,65 @@ export function Record({ goTo }: { goTo: (v: "library" | "settings") => void }) 
 
   const translateMissing = missing(featureItems(models, "translate")).length > 0 && settings.slots.translate.kind === "managed";
   const recording = meetingId !== null;
+  const empty = recording
+    ? paused
+      ? t("record.empty.paused")
+      : t("record.empty.listening")
+    : t("record.empty.idle");
 
   return (
     <div className="flex h-full flex-col gap-4 p-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">{recording ? (paused ? "Paused" : "Recording") : "Ready to record"}</h1>
-          <p className="text-sm text-mute">Captures your microphone and everything your computer plays, so it works with any meeting app.</p>
+          <h1 className="text-xl font-semibold">{recording ? (paused ? t("record.status.paused") : t("record.status.recording")) : t("record.status.ready")}</h1>
+          <p className="text-sm text-mute">{t("record.subtitle")}</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="hidden flex-col gap-1 sm:flex">
-            <LevelMeter label="You" level={live.levels.mic} />
-            <LevelMeter label="Others" level={live.levels.system} />
+            <LevelMeter label={t("record.meter.you")} level={live.levels.mic} />
+            <LevelMeter label={t("record.meter.others")} level={live.levels.system} />
           </div>
           {recording ? (
             <>
-              <Button variant="secondary" onClick={togglePause} disabled={busy} className="px-5 py-2.5">{paused ? "▶ Resume" : "❚❚ Pause"}</Button>
-              <Button variant="danger" onClick={stop} disabled={busy} className="px-5 py-2.5">■ Stop</Button>
+              <Button variant="secondary" onClick={togglePause} disabled={busy} className="px-5 py-2.5">{paused ? t("record.btn.resume") : t("record.btn.pause")}</Button>
+              <Button variant="danger" onClick={stop} disabled={busy} className="px-5 py-2.5">{t("record.btn.stop")}</Button>
             </>
           ) : (
-            <Button variant="primary" onClick={start} disabled={busy} className="px-5 py-2.5">● Start recording</Button>
+            <Button variant="primary" onClick={start} disabled={busy} className="px-5 py-2.5">{t("record.btn.start")}</Button>
           )}
         </div>
       </header>
 
-      {starting && <Banner kind="info">{startupMessage(starting.estimate, Date.now() - starting.since)}</Banner>}
+      {starting && <Banner kind="info">{startupMessage(starting.estimate, Date.now() - starting.since, t)}</Banner>}
       {error && <Banner onClose={() => setError(null)}>{error}</Banner>}
       {live.warnings.map((w) => <Banner key={w} kind="warn">{w}</Banner>)}
-      {noSpeech && !recording && <Banner kind="info" onClose={() => setNoSpeech(false)}>No speech was detected, so this recording was not saved to your library.</Banner>}
+      {noSpeech && !recording && <Banner kind="info" onClose={() => setNoSpeech(false)}>{t("record.banner.noSpeech")}</Banner>}
       {savedId !== null && !recording && (
         <Banner kind="info">
-          Saved to your library. <button className="underline" onClick={() => goTo("library")}>Open it to summarize or export</button>
+          {t("record.banner.saved")} <button className="underline" onClick={() => goTo("library")}>{t("record.banner.openLibrary")}</button>
         </Banner>
       )}
 
-      <Card title="Live translation" className="shrink-0">
+      <Card title={t("record.card.liveTranslation")} className="shrink-0">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm text-mute" htmlFor="target-lang">Translate other speakers into</label>
+          <label className="text-sm text-mute" htmlFor="target-lang">{t("record.translate.label")}</label>
           <Select id="target-lang" value={settings.target_lang} onChange={(e) => void save({ ...settings, target_lang: e.target.value })} disabled={translating}>
             {languages.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
           </Select>
           <Button variant={translating ? "secondary" : "primary"} onClick={toggleTranslation} disabled={!recording || busy || translateMissing}>
-            {translating ? "Stop translating" : "Start translating"}
+            {translating ? t("record.translate.stop") : t("record.translate.start")}
           </Button>
-          {translating && <Button variant="ghost" onClick={() => api().showOverlay(true)}>Show overlay</Button>}
+          {translating && <Button variant="ghost" onClick={() => api().showOverlay(true)}>{t("record.translate.showOverlay")}</Button>}
         </div>
         <p className="mt-2 text-xs text-mute">
           {translateMissing ? (
-            <>The translation model is not installed. <button className="underline" onClick={() => goTo("settings")}>Download it in Settings</button>.</>
-          ) : !recording ? "Start a recording first. Translation never starts on its own." : "Only other people are translated, and only when they speak a different language. Ctrl+Alt+T shows or hides the overlay."}
+            <>{t("record.translate.needModel")} <button className="underline" onClick={() => goTo("settings")}>{t("record.translate.downloadLink")}</button>.</>
+          ) : !recording ? t("record.translate.hintIdle") : t("record.translate.hintActive")}
         </p>
       </Card>
 
       <Card className="min-h-0 flex-1 overflow-y-auto">
-        <Transcript segments={live.segments} speakers={speakers} autoScroll empty={recording ? (paused ? "Paused. Press Resume to continue this transcript." : "Listening… speak or play something.") : "Your live transcript will appear here."} />
+        <Transcript segments={live.segments} speakers={speakers} autoScroll empty={empty} />
       </Card>
     </div>
   );

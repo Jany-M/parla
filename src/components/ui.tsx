@@ -1,11 +1,12 @@
 import type { ButtonHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { useT } from "../i18n";
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent-strong hover:bg-indigo-500 text-white",
-  secondary: "bg-raised hover:bg-[#232838] text-slate-100 border border-line",
+  secondary: "bg-raised hover:brightness-125 text-slate-100 border border-line",
   danger: "bg-red-600/90 hover:bg-red-500 text-white",
-  ghost: "hover:bg-raised text-mute hover:text-slate-100",
+  ghost: "border border-line bg-raised/70 hover:bg-raised text-mute hover:text-slate-100",
 };
 
 export function Button({ variant = "secondary", className = "", ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
@@ -30,11 +31,11 @@ export function Select({ className = "", ...p }: SelectHTMLAttributes<HTMLSelect
   return <select {...p} className={`rounded-lg border border-line bg-raised px-3 py-2 text-sm text-slate-100 outline-none focus:border-accent ${className}`} />;
 }
 
-export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+export function Toggle({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
-    <label className="flex cursor-pointer items-center gap-3 text-sm">
-      <input type="checkbox" role="switch" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} className="peer sr-only" />
-      <span className="relative h-5 w-9 rounded-full bg-line transition peer-checked:bg-accent-strong after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4" />
+    <label className={`flex items-center gap-3 text-sm ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
+      <input type="checkbox" role="switch" aria-label={label} checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="peer sr-only" />
+      <span className="relative h-5 w-9 shrink-0 rounded-full bg-line transition peer-checked:bg-accent-strong after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4" />
       <span>{label}</span>
     </label>
   );
@@ -52,11 +53,12 @@ export function ProgressBar({ value, label }: { value: number; label?: string })
 }
 
 export function Banner({ kind = "error", children, onClose }: { kind?: "error" | "info" | "warn"; children: ReactNode; onClose?: () => void }) {
+  const t = useT();
   const c = { error: "border-red-500/40 bg-red-500/10 text-red-200", warn: "border-amber-500/40 bg-amber-500/10 text-amber-200", info: "border-accent/40 bg-accent/10 text-indigo-100" }[kind];
   return (
     <div role={kind === "error" ? "alert" : "status"} className={`flex items-start justify-between gap-3 rounded-lg border px-3.5 py-2.5 text-sm ${c}`}>
       <span>{children}</span>
-      {onClose && <button onClick={onClose} aria-label="Dismiss" className="opacity-70 hover:opacity-100">✕</button>}
+      {onClose && <button onClick={onClose} aria-label={t("ui.dismiss")} className="opacity-70 hover:opacity-100">✕</button>}
     </div>
   );
 }

@@ -13,7 +13,7 @@ use crate::settings::Settings;
 use crate::slots::SlotChoice;
 use crate::store::Store;
 use crate::summary::{self, SummaryConfig};
-use crate::translate::{LlmTranslator, TranslationHub};
+use crate::translate::{LlmTranslator, TranslationHub, LIVE_QUEUE_CAP};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -256,8 +256,19 @@ impl Service {
             }
             SlotChoice::LocalFile { path } => PathBuf::from(path),
             SlotChoice::Managed { item_id } => {
-                let id = item_id.as_deref().unwrap_or(default_item);
-                let dir = self.installed(id).ok_or_else(|| anyhow!("The {what} model is not installed yet. Open Settings → Models to download it."))?;
+                let preferred = item_id.as_deref().unwrap_or(default_item);
+                let dir = self
+                    .installed(preferred)
+                    .or_else(|| self.installed(default_item))
+                    .or_else(|| {
+                        self.manifest.get(default_item).and_then(|item| {
+                            self.manifest
+                                .for_slot(item.slot, current_platform())
+                                .into_iter()
+                                .find_map(|i| self.installed(&i.id))
+                        })
+                    })
+                    .ok_or_else(|| anyhow!("The {what} model is not installed yet. Open Settings → Models to download it."))?;
                 find_file(&dir, &|n| n.ends_with(".gguf")).ok_or_else(|| anyhow!("the {what} model folder has no .gguf file"))?
             }
         };
@@ -309,8 +320,8 @@ impl Service {
             bail!("a recording is already running");
         }
         let s = self.settings();
-        let hub = TranslationHub::new(self.sink.clone(), self.store.clone());
         let meeting_id = self.store.create_meeting("live")?;
+        let hub = TranslationHub::new(self.sink.clone(), self.store.clone(), meeting_id);
         let paused = Arc::new(AtomicBool::new(false));
         let started = (|| -> Result<(Session, Vec<Box<dyn AudioSource>>)> {
             let mut session = self.session_for(meeting_id, hub.clone(), &s, paused.clone())?;
@@ -337,11 +348,13 @@ impl Service {
             let saved = store.segments(meeting_id).map(|s| !s.is_empty()).unwrap_or(true);
             if saved {
                 let _ = store.end_meeting(meeting_id);
+                // `Stopped` for saved meetings is emitted from `stop_live` after auto-title,
+                // so the library never races an empty title.
             } else {
                 log::info!("recording {meeting_id} had no speech, not saved");
                 let _ = store.delete_meeting(meeting_id);
+                sink.emit(Event::Stopped { meeting_id, saved: false });
             }
-            sink.emit(Event::Stopped { meeting_id, saved });
             let _ = rec_slot; // keep the slot alive for the thread's lifetime only
         });
         log::info!("recording {meeting_id} started (mic: {}, system: {})", s.mic_device.as_deref().unwrap_or("default"), s.system_device.as_deref().unwrap_or("default"));
@@ -377,13 +390,14 @@ impl Service {
         if self.store.get_meeting(r.meeting_id)?.is_none() {
             return Ok(None);
         }
-        // Best-effort short title via the summarize model (already installed for notes).
+        // Best-effort short title (AI, then transcript excerpt) before telling the UI we stopped.
         self.assign_ai_title(r.meeting_id);
+        self.sink.emit(Event::Stopped { meeting_id: r.meeting_id, saved: true });
         Ok(Some(r.meeting_id))
     }
 
-    /// Sets a one-line AI title when the meeting still has an empty title.
-    /// Failures are logged and ignored so stopping a recording never fails on titling.
+    /// Sets a one-line title when the meeting still has an empty title.
+    /// Tries the summarize model first, then a transcript excerpt. Never fails `stop_live`.
     fn assign_ai_title(&self, meeting_id: i64) {
         let result = (|| -> Result<()> {
             let detail = self.store.get_meeting(meeting_id)?.context("meeting not found")?;
@@ -394,17 +408,30 @@ impl Service {
             if lines.iter().all(|l| l.trim().is_empty()) {
                 return Ok(());
             }
+            log::info!("auto-titling meeting {meeting_id}");
             let s = self.settings();
             let lang = languages::by_code(&s.summary_lang).map(|l| l.name).unwrap_or("English");
-            let (model, _server) =
-                self.chat_model(&s.slots.summarize, self.recommendation().summarize_item, 2048, "title")?;
-            let title = summary::generate_title(model.as_ref(), &lines, lang)?;
+            crate::llm::kill_stale(&self.paths.models_dir());
+            let title = match self.chat_model(&s.slots.summarize, self.recommendation().summarize_item, 2048, "title") {
+                Ok((model, _server)) => match summary::generate_title(model.as_ref(), &lines, lang) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        log::warn!("AI title failed for meeting {meeting_id}: {e:#}");
+                        summary::fallback_title(&lines).ok_or(e)?
+                    }
+                },
+                Err(e) => {
+                    log::warn!("title model unavailable for meeting {meeting_id}: {e:#}");
+                    summary::fallback_title(&lines).ok_or(e)?
+                }
+            };
             self.store.set_title(meeting_id, &title)?;
             log::info!("meeting {meeting_id} titled: {title}");
             Ok(())
         })();
         if let Err(e) = result {
             log::warn!("could not auto-title meeting {meeting_id}: {e:#}");
+            self.sink.emit(Event::Warning { message: format!("Could not set a meeting title: {e}") });
         }
     }
 
@@ -420,7 +447,7 @@ impl Service {
         let hub = self.rec.lock().unwrap().as_ref().map(|r| r.hub.clone()).ok_or_else(|| anyhow!("Start a recording first"))?;
         let s = self.settings();
         let (model, server) = self.chat_model(&s.slots.translate, self.recommendation().translate_item, 2048, "translation")?;
-        hub.start(Box::new(LlmTranslator(model)), target, 6);
+        hub.start(Box::new(LlmTranslator(model)), target, LIVE_QUEUE_CAP);
         *self.mt_server.lock().unwrap() = server;
         Ok(())
     }
@@ -590,7 +617,7 @@ mod tests {
         let llm = MockServer::start(|_| {
             Reply::json(json!({"choices":[{"message":{"content":"\"Morning standup on the budget\""}}]}))
         });
-        let (svc, _s, _t) = make(texts(&["Buongiorno a tutti, iniziamo la riunione di oggi"]), Manifest::default());
+        let (svc, sink, _t) = make(texts(&["Buongiorno a tutti, iniziamo la riunione di oggi"]), Manifest::default());
         fake_install(&svc, ids::STT);
         let mut s = svc.settings();
         s.slots.summarize = SlotChoice::Endpoint { url: llm.base.clone(), model: "m".into(), api_key: None };
@@ -601,6 +628,28 @@ mod tests {
         let title = svc.store().get_meeting(id).unwrap().unwrap().meeting.title;
         assert_eq!(title, "Morning standup on the budget");
         assert!(llm.requests().iter().any(|r| r.body.contains("12 words")));
+        let ev = sink.take();
+        let stopped = ev.iter().rev().find_map(|e| match e {
+            Event::Stopped { meeting_id, saved } => Some((*meeting_id, *saved)),
+            _ => None,
+        });
+        assert_eq!(stopped, Some((id, true)), "Stopped must fire after the title is stored");
+    }
+
+    #[test]
+    fn stop_live_falls_back_to_transcript_when_title_model_is_down() {
+        let llm = MockServer::start(|_| Reply::status(500, "boom"));
+        let (svc, _s, _t) = make(texts(&["Buongiorno a tutti, iniziamo la riunione di oggi"]), Manifest::default());
+        fake_install(&svc, ids::STT);
+        let mut s = svc.settings();
+        s.slots.summarize = SlotChoice::Endpoint { url: llm.base.clone(), model: "m".into(), api_key: None };
+        svc.update_settings(s).unwrap();
+        let id = svc.start_live().unwrap();
+        wait_for(|| svc.store().segments(id).unwrap().len() == 1);
+        assert_eq!(svc.stop_live().unwrap(), Some(id));
+        let title = svc.store().get_meeting(id).unwrap().unwrap().meeting.title;
+        assert!(!title.trim().is_empty(), "expected transcript fallback title, got {title:?}");
+        assert!(!title.eq_ignore_ascii_case("untitled"));
     }
 
     #[test]

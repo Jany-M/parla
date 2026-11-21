@@ -18,20 +18,24 @@ pub struct Settings {
     pub overlay_opacity: f32,
     /// Language of generated summaries.
     pub summary_lang: String,
+    /// App chrome language (en / it / fr). Defaults from the OS when supported.
+    pub ui_lang: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
+        let content = crate::languages::system_language_code().to_string();
         Self {
             slots: SlotConfig::default(),
-            target_lang: "en".into(),
+            target_lang: content.clone(),
             mic_device: None,
             system_device: None,
             echo_guard: true,
             onboarding_done: false,
             overlay_font_px: 22,
             overlay_opacity: 0.85,
-            summary_lang: "en".into(),
+            summary_lang: content,
+            ui_lang: crate::languages::system_ui_language_code().to_string(),
         }
     }
 }
@@ -87,5 +91,6 @@ mod tests {
         let s = Settings::load(&p);
         assert_eq!(s.target_lang, "fr");
         assert!(s.echo_guard);
+        assert!(["en", "it", "fr"].contains(&s.ui_lang.as_str()));
     }
 }

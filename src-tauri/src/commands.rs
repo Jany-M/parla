@@ -208,19 +208,24 @@ pub fn recording_state(s: State<AppState>) -> Option<i64> {
 }
 
 #[tauri::command]
-pub async fn start_translation(s: State<'_, AppState>, target: String) -> Res<()> {
+pub async fn start_translation(app: AppHandle, s: State<'_, AppState>, target: String) -> Res<()> {
     let svc = s.svc.clone();
-    blocking(move || svc.start_translation(&target)).await
+    blocking(move || svc.start_translation(&target)).await?;
+    // Always raise the overlay when translation starts (Show overlay is only for re-opening after hide).
+    show_overlay(app, true);
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn stop_translation(s: State<'_, AppState>) -> Res<()> {
+pub async fn stop_translation(app: AppHandle, s: State<'_, AppState>) -> Res<()> {
     let svc = s.svc.clone();
     blocking(move || {
         svc.stop_translation();
         Ok(())
     })
-    .await
+    .await?;
+    show_overlay(app, false);
+    Ok(())
 }
 
 #[tauri::command]
@@ -314,15 +319,30 @@ pub fn toggle_overlay_window(app: &AppHandle) {
         if w.is_visible().unwrap_or(false) {
             let _ = w.hide();
         } else {
-            let _ = w.show();
+            show_overlay_window(&w);
         }
     }
+}
+
+fn show_overlay_window(w: &tauri::WebviewWindow) {
+    // Windows can leave a never-shown always-on-top window inert after a bare `show()`.
+    let _ = w.unminimize();
+    if let Err(e) = w.show() {
+        log::warn!("could not show overlay: {e}");
+    }
+    let _ = w.set_always_on_top(true);
 }
 
 #[tauri::command]
 pub fn show_overlay(app: AppHandle, show: bool) {
     if let Some(w) = app.get_webview_window("overlay") {
-        let _ = if show { w.show() } else { w.hide() };
+        if show {
+            show_overlay_window(&w);
+        } else {
+            let _ = w.hide();
+        }
+    } else {
+        log::warn!("overlay window missing");
     }
 }
 

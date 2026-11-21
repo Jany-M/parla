@@ -19,6 +19,7 @@ Local AI/LLMs only (max privacy), no accounts, no subscriptions, no cloud, no hi
 * **Translate on demand** - turn the floating overlay on when you need it
 * **Summarize on demand** after a meeting (or skip it)
 * **Export to Markdown** (`.md`) for notes elsewhere
+* **App language** English, Italian, or French (defaults to your OS language when supported; change anytime in Settings)
 
 <img width="2874" height="1995" alt="screenshot_recording" src="https://github.com/user-attachments/assets/2a79146c-2f8f-44d9-bd01-d325ef5d921b" />
 

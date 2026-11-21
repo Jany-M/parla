@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Banner, Button, Card, ProgressBar } from "../components/ui";
+import { Banner, Button, Card, ProgressBar, Toggle } from "../components/ui";
 import { useApp } from "../context";
+import { useT } from "../i18n";
 import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { batchProgress, essentials, featureItems, missing, totalBytes } from "../lib/models";
@@ -9,6 +10,7 @@ import type { ModelProgress, ModelStatus } from "../lib/types";
 /** First run: explain, let the user pick optional features, download, done. */
 export function Wizard() {
   const { models, settings, save, refreshModels, info } = useApp();
+  const t = useT();
   const [wantTranslate, setWantTranslate] = useState(true);
   const [wantSummary, setWantSummary] = useState(true);
   const [phase, setPhase] = useState<"choose" | "download">("choose");
@@ -55,46 +57,49 @@ export function Wizard() {
     <div className="grid h-full place-items-center overflow-y-auto p-6">
       <div className="w-full max-w-xl space-y-5">
         <div>
-          <h1 className="text-2xl font-semibold">Welcome to Parla</h1>
-          <p className="mt-1 text-mute">Meeting notes, speaker labels and live translation, all on this computer. Nothing is sent anywhere, and there are no accounts.</p>
+          <h1 className="text-2xl font-semibold">{t("wizard.title")}</h1>
+          <p className="mt-1 text-mute">{t("wizard.subtitle")}</p>
         </div>
-        <Card title="This computer">
-          <p className="text-sm">About <strong>{ramGb} GB</strong> RAM · {info.system.hardware.cpu_threads} CPU threads{info.system.hardware.has_avx2 ? "" : " · no AVX2"}</p>
+        <Card title={t("wizard.computer.title")}>
+          <p className="text-sm">
+            {t("wizard.computer.specs", { gb: ramGb, threads: info.system.hardware.cpu_threads })}
+            {info.system.hardware.has_avx2 ? "" : ` · ${t("wizard.computer.noAvx2")}`}
+          </p>
           {summaryPick && (
             <p className="mt-2 text-sm text-mute">
-              Recommended summaries model: <span className="font-medium text-slate-100">{summaryPick.label}</span>
-              {ramGb < 16 ? " (the larger 4B model needs about 16 GB RAM)." : " (you can switch to the smaller 2B model later in Settings)."}
+              {t("wizard.computer.summaryRec")} <span className="font-medium text-slate-100">{summaryPick.label}</span>
+              {ramGb < 16 ? t("wizard.computer.summaryLowRam") : t("wizard.computer.summaryHighRam")}
             </p>
           )}
         </Card>
         {warn && <Banner kind="warn">{warn}</Banner>}
         {error && <Banner onClose={() => setError(null)}>{error}</Banner>}
 
-        <Card title="What gets downloaded (once)">
+        <Card title={t("wizard.download.title")}>
           <ul className="space-y-3 text-sm">
-            <li className="flex justify-between"><span>Speech recognition and speaker labels <span className="text-mute">(required)</span></span><span className="text-mute">{formatBytes(totalBytes(essentials(models)))}</span></li>
+            <li className="flex justify-between"><span>{t("wizard.download.required")} <span className="text-mute">{t("wizard.download.requiredTag")}</span></span><span className="text-mute">{formatBytes(totalBytes(essentials(models)))}</span></li>
             <li className="flex items-start justify-between gap-3">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={wantTranslate} onChange={(e) => setWantTranslate(e.target.checked)} disabled={phase === "download"} /> Live translation overlay</label>
-              <span className="text-mute">{formatBytes(totalBytes(featureItems(models, "translate")))}</span>
+              <Toggle label={t("wizard.download.translate")} checked={wantTranslate} onChange={setWantTranslate} disabled={phase === "download"} />
+              <span className="shrink-0 text-mute">{formatBytes(totalBytes(featureItems(models, "translate")))}</span>
             </li>
             <li className="flex items-start justify-between gap-3">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={wantSummary} onChange={(e) => setWantSummary(e.target.checked)} disabled={phase === "download"} /> Meeting summaries{summaryPick ? ` - ${summaryPick.label}` : ""}</label>
-              <span className="text-mute">{formatBytes(totalBytes(featureItems(models, "summarize")))}</span>
+              <Toggle label={`${t("wizard.download.summaries")}${summaryPick ? ` - ${summaryPick.label}` : ""}`} checked={wantSummary} onChange={setWantSummary} disabled={phase === "download"} />
+              <span className="shrink-0 text-mute">{formatBytes(totalBytes(featureItems(models, "summarize")))}</span>
             </li>
           </ul>
-          <p className="mt-3 text-xs text-mute">Shared parts are counted once. You can add or remove models later in Settings, and uninstalling Parla removes them all.</p>
+          <p className="mt-3 text-xs text-mute">{t("wizard.download.sharedNote")}</p>
         </Card>
 
         {phase === "download" ? (
           <Card>
-            <ProgressBar value={batchProgress(chosen, progress)} label="Download progress" />
-            <p className="mt-2 text-sm text-mute">Downloading {todo.find((m) => m.id === progress?.id)?.label ?? "models"}… this can take a few minutes.</p>
-            <Button variant="ghost" className="mt-2" onClick={() => api().cancelInstall()}>Cancel</Button>
+            <ProgressBar value={batchProgress(chosen, progress)} label={t("wizard.download.progress")} />
+            <p className="mt-2 text-sm text-mute">{t("wizard.download.downloading", { label: todo.find((m) => m.id === progress?.id)?.label ?? t("wizard.download.modelsFallback") })}</p>
+            <Button variant="ghost" className="mt-2" onClick={() => api().cancelInstall()}>{t("wizard.download.cancel")}</Button>
           </Card>
         ) : (
           <div className="flex items-center justify-between">
-            <span className="text-sm text-mute">{todo.length === 0 ? "Everything is already installed." : `${formatBytes(totalBytes(todo))} to download`}</span>
-            <Button variant="primary" onClick={todo.length === 0 ? () => save({ ...settings, onboarding_done: true }) : run}>{todo.length === 0 ? "Get started" : "Download and continue"}</Button>
+            <span className="text-sm text-mute">{todo.length === 0 ? t("wizard.download.allInstalled") : t("wizard.download.toDownload", { bytes: formatBytes(totalBytes(todo)) })}</span>
+            <Button variant="primary" onClick={todo.length === 0 ? () => save({ ...settings, onboarding_done: true }) : run}>{todo.length === 0 ? t("wizard.cta.getStarted") : t("wizard.cta.downloadContinue")}</Button>
           </div>
         )}
       </div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppProvider } from "./context";
+import { useT } from "./i18n";
 import { api } from "./lib/api";
 import type { UpdateInfo } from "./lib/types";
 import { Library } from "./views/Library";
@@ -8,16 +9,17 @@ import { Settings } from "./views/Settings";
 import { Wizard } from "./views/Wizard";
 
 type View = "record" | "library" | "settings";
-const NAV: { id: View; label: string; icon: string }[] = [
-  { id: "record", label: "Record", icon: "●" },
-  { id: "library", label: "Library", icon: "☰" },
-  { id: "settings", label: "Settings", icon: "⚙" },
+const NAV: { id: View; labelKey: "nav.record" | "nav.library" | "nav.settings"; icon: string }[] = [
+  { id: "record", labelKey: "nav.record", icon: "●" },
+  { id: "library", labelKey: "nav.library", icon: "☰" },
+  { id: "settings", labelKey: "nav.settings", icon: "⚙" },
 ];
 
 /** How often to re-check GitHub Releases while the main window is open. */
 export const UPDATE_CHECK_MS = 60 * 60 * 1000;
 
 function SidebarFooter({ version }: { version: string }) {
+  const t = useT();
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState<number | null>(null);
@@ -52,12 +54,12 @@ function SidebarFooter({ version }: { version: string }) {
 
   const label = busy
     ? pct != null
-      ? `Updating… ${pct}%`
-      : "Updating…"
+      ? t("update.updatingPct", { pct })
+      : t("update.updating")
     : update
       ? update.auto_install
-        ? `Update to v${update.version}`
-        : `Download v${update.version}`
+        ? t("update.toVersion", { version: update.version })
+        : t("update.downloadVersion", { version: update.version })
       : null;
 
   const link = "cursor-pointer underline decoration-dotted hover:text-slate-100";
@@ -66,7 +68,7 @@ function SidebarFooter({ version }: { version: string }) {
   return (
     <div className="mt-auto flex flex-col">
       <div className="px-3 text-[10px] leading-snug text-mute">
-        <span className="block">Developed by</span>
+        <span className="block">{t("sidebar.developedBy")}</span>
         <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
           <button type="button" className={link} onClick={() => void api().openUrl("https://github.com/Jany-M")}>
             Jany Martelli
@@ -78,12 +80,12 @@ function SidebarFooter({ version }: { version: string }) {
         </span>
         <span className="mt-2.5 flex items-center gap-1.5">
           <button type="button" className={link} onClick={() => void api().openUrl(issues)}>
-            Feedback & Issues
+            {t("sidebar.feedback")}
           </button>
           <button
             type="button"
-            aria-label="Parla on GitHub"
-            title="Parla on GitHub"
+            aria-label={t("sidebar.githubAria")}
+            title={t("sidebar.githubAria")}
             className="inline-flex cursor-pointer text-mute hover:text-slate-100"
             onClick={() => void api().openUrl(issues)}
           >
@@ -95,9 +97,9 @@ function SidebarFooter({ version }: { version: string }) {
       </div>
       <div className="mt-3 flex items-center justify-between gap-2 px-3 text-[10px] leading-snug text-mute">
         <button type="button" onClick={() => void api().openLogs()} className={link}>
-          Open logs
+          {t("sidebar.openLogs")}
         </button>
-        <button type="button" className={link} title="Check for updates" aria-label={`Version ${version}, check for updates`} onClick={check}>
+        <button type="button" className={link} title={t("sidebar.checkUpdatesTitle")} aria-label={t("sidebar.versionAria", { version })} onClick={check}>
           v{version}
         </button>
       </div>
@@ -143,34 +145,35 @@ function SidebarFooter({ version }: { version: string }) {
   );
 }
 
-export default function App() {
+function Shell({ version }: { version: string }) {
+  const t = useT();
   const [view, setView] = useState<View>("record");
   return (
+    <div className="flex h-full overflow-hidden">
+      <nav aria-label={t("nav.main")} className="flex w-44 shrink-0 flex-col gap-1 border-r border-line bg-panel p-3">
+        <div className="mb-4 px-3 pt-2 text-lg font-semibold tracking-tight">{t("brand.name")}</div>
+        {NAV.map((n) => (
+          <button key={n.id} onClick={() => setView(n.id)} aria-current={view === n.id ? "page" : undefined}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${view === n.id ? "bg-raised text-white" : "text-mute hover:bg-raised/60 hover:text-slate-100"}`}>
+            <span className={n.id === "record" ? "text-red-400" : ""}>{n.icon}</span>{t(n.labelKey)}
+          </button>
+        ))}
+        <SidebarFooter version={version} />
+      </nav>
+      <div className="h-full min-w-0 flex-1 overflow-hidden">
+        {/* Record stays mounted so a running recording's view is never lost when browsing */}
+        <div className={view === "record" ? "h-full" : "hidden"}><Record goTo={(v) => setView(v)} /></div>
+        {view === "library" && <Library goTo={(v) => setView(v)} />}
+        {view === "settings" && <Settings />}
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
     <AppProvider>
-      {(ctx) =>
-        !ctx.settings.onboarding_done ? (
-          <Wizard />
-        ) : (
-          <div className="flex h-full overflow-hidden">
-            <nav aria-label="Main" className="flex w-44 shrink-0 flex-col gap-1 border-r border-line bg-panel p-3">
-              <div className="mb-4 px-3 pt-2 text-lg font-semibold tracking-tight">Parla</div>
-              {NAV.map((n) => (
-                <button key={n.id} onClick={() => setView(n.id)} aria-current={view === n.id ? "page" : undefined}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${view === n.id ? "bg-raised text-white" : "text-mute hover:bg-raised/60 hover:text-slate-100"}`}>
-                  <span className={n.id === "record" ? "text-red-400" : ""}>{n.icon}</span>{n.label}
-                </button>
-              ))}
-              <SidebarFooter version={ctx.info.version} />
-            </nav>
-            <div className="h-full min-w-0 flex-1 overflow-hidden">
-              {/* Record stays mounted so a running recording's view is never lost when browsing */}
-              <div className={view === "record" ? "h-full" : "hidden"}><Record goTo={(v) => setView(v)} /></div>
-              {view === "library" && <Library goTo={(v) => setView(v)} />}
-              {view === "settings" && <Settings />}
-            </div>
-          </div>
-        )
-      }
+      {(ctx) => (!ctx.settings.onboarding_done ? <Wizard /> : <Shell version={ctx.info.version} />)}
     </AppProvider>
   );
 }

@@ -7,7 +7,7 @@ export const defaultSettings = (): Settings => ({
     translate: { kind: "managed", item_id: null }, summarize: { kind: "managed", item_id: null },
   },
   target_lang: "en", mic_device: null, system_device: null, echo_guard: true, onboarding_done: false,
-  overlay_font_px: 22, overlay_opacity: 0.85, summary_lang: "en",
+  overlay_font_px: 22, overlay_opacity: 0.85, summary_lang: "en", ui_lang: "en",
 });
 
 const model = (

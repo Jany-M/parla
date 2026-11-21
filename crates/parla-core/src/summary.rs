@@ -16,7 +16,7 @@ impl Default for SummaryConfig {
 }
 
 const TITLE_EXCERPT_CHARS: usize = 2_000;
-const TITLE_MAX_CHARS: usize = 80;
+const TITLE_MAX_CHARS: usize = 56;
 
 /// Pack transcript lines into a short excerpt for the title prompt.
 pub fn excerpt_lines(lines: &[String], max_chars: usize) -> String {
@@ -89,6 +89,21 @@ pub fn generate_title(model: &dyn ChatModel, lines: &[String], language_name: &s
     let excerpt = excerpt_lines(lines, TITLE_EXCERPT_CHARS);
     let raw = model.chat(&prompts::title_messages(language_name, &excerpt), &ChatOptions::title())?;
     sanitize_title(&raw).ok_or_else(|| anyhow!("the model returned an empty title"))
+}
+
+/// Non-AI fallback: first substantial transcript line (speaker prefix stripped), sanitized.
+pub fn fallback_title(lines: &[String]) -> Option<String> {
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let body = line.split_once(": ").map(|(_, rest)| rest.trim()).unwrap_or(line);
+        if let Some(title) = sanitize_title(body) {
+            return Some(title);
+        }
+    }
+    None
 }
 
 /// Map-reduce summary: one call if it fits, otherwise partial notes per slice, merged
@@ -202,5 +217,11 @@ mod tests {
         assert_eq!(title, "Planning the product launch");
         let prompt = &m.calls.lock().unwrap()[0][1].content;
         assert!(prompt.contains("12 words") && prompt.contains("sentence 0"));
+    }
+
+    #[test]
+    fn fallback_title_uses_first_substantial_line() {
+        assert_eq!(fallback_title(&["Me:  Hi there everyone, welcome".into()]).as_deref(), Some("Hi there everyone, welcome"));
+        assert!(fallback_title(&["  ".into(), ": ".into()]).is_none());
     }
 }

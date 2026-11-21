@@ -27,6 +27,7 @@ tar = "0.4"
 whatlang = "0.16"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 dirs = "6"
+sys-locale = "0.3"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "isomp4", "ogg", "vorbis", "flac", "wav", "pcm", "mkv", "alac", "adpcm"] }
 rubato = "0.16"
 sherpa-onnx = { version = "*", optional = true }

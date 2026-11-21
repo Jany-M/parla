@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { I18nProvider, useT } from "../i18n";
 import { api } from "../lib/api";
 import { emptyLive, reduceLive } from "../lib/live";
 import { OVERLAY_RESUME_MS, overlayLines, shouldStartOverlayDrag } from "../lib/overlay";
@@ -7,15 +8,28 @@ import type { Settings } from "../lib/types";
 
 /** Floating, always-on-top caption box (excluded from screen sharing). Full translation history, newest at the bottom. */
 export function Overlay() {
-  const [live, dispatch] = useReducer(reduceLive, undefined, emptyLive);
   const [settings, setSettings] = useState<Settings | null>(null);
+
+  useEffect(() => {
+    document.body.classList.add("overlay-body");
+    void api().getSettings().then(setSettings);
+  }, []);
+
+  return (
+    <I18nProvider lang={settings?.ui_lang ?? "en"}>
+      <OverlayBody settings={settings} />
+    </I18nProvider>
+  );
+}
+
+function OverlayBody({ settings }: { settings: Settings | null }) {
+  const t = useT();
+  const [live, dispatch] = useReducer(reduceLive, undefined, emptyLive);
   const box = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    document.body.classList.add("overlay-body");
-    void api().getSettings().then(setSettings);
     let off: (() => void) | undefined;
     let cancelled = false;
     api().onEvent(dispatch).then((u) => (cancelled ? u() : (off = u)));
@@ -87,7 +101,7 @@ export function Overlay() {
       <button
         type="button"
         data-no-drag
-        aria-label="Hide overlay"
+        aria-label={t("overlay.hideAria")}
         onClick={() => api().showOverlay(false)}
         className="absolute right-3 top-2 z-10 cursor-pointer text-sm text-slate-400 hover:text-white"
       >
@@ -95,12 +109,12 @@ export function Overlay() {
       </button>
       <div
         ref={box}
-        aria-label="Translation overlay"
+        aria-label={t("overlay.aria")}
         className="h-full overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.25)_transparent]"
       >
         <div className="flex min-h-full flex-col justify-end gap-1.5">
           {lines.length === 0 ? (
-            <p className="text-center text-base text-slate-400">Translations of other speakers appear here.</p>
+            <p className="text-center text-base text-slate-400">{t("overlay.empty")}</p>
           ) : (
             lines.map((l) => (
               <p key={l.id} className={`leading-snug ${l.fresh ? "font-semibold text-white" : "text-slate-300/80"}`}>{l.text}</p>
