@@ -443,6 +443,8 @@ pub async fn install_update(app: AppHandle, s: State<'_, AppState>) -> Res<()> {
             logs_dir.join(parla_core::update::UPDATE_HELPER_LOG).display()
         );
         spawn_windows_updater(installer, exe, logs_dir).map_err(err)?;
+        // Give `cmd /c start` a moment to hand off before this process (and its job) tear down.
+        std::thread::sleep(std::time::Duration::from_millis(750));
         log::info!("update helper started; exiting so files can be replaced");
         log::logger().flush();
         app.exit(0);
@@ -459,14 +461,16 @@ fn ps_quote(path: &std::path::Path) -> String {
 /// Wait for this process to exit, run the NSIS installer silently, then relaunch Parla.
 ///
 /// Tauri NSIS flags: `/S` silent, `/UPDATE` keeps app data (hooks.nsh), `/R` relaunches the app.
-/// The helper must break out of Parla's Windows job object or it is killed when we `app.exit`.
+///
+/// The helper must outlive `app.exit`. Spawning PowerShell directly with
+/// `CREATE_BREAKAWAY_FROM_JOB` still dies under WebView2's job on some machines
+/// (symptom: leftover `parla-apply-update-*.ps1`, no `update.log`, version unchanged).
+/// `cmd /c start` starts a process outside that job.
 #[cfg(windows)]
 fn spawn_windows_updater(installer: PathBuf, app_exe: PathBuf, logs_dir: PathBuf) -> anyhow::Result<()> {
+    use std::io::Write;
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
 
     let pid = std::process::id();
     let script = std::env::temp_dir().join(format!("parla-apply-update-{pid}.ps1"));
@@ -481,7 +485,7 @@ function Write-Log([string]$m) {{
   $line = '{{0:u}} {{1}}' -f (Get-Date).ToUniversalTime(), $m
   Add-Content -LiteralPath $log -Value $line -Encoding utf8
 }}
-Write-Log 'waiting for pid {pid} to exit'
+Write-Log 'helper alive; waiting for pid {pid} to exit'
 while (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ Start-Sleep -Milliseconds 400 }}
 Start-Sleep -Seconds 2
 # Release locks from leftover Parla / WebView2 children still under the install dir.
@@ -499,8 +503,15 @@ if (-not (Test-Path -LiteralPath $setup)) {{
   exit 2
 }}
 Write-Log ("running installer: {{0}} /S /UPDATE /R" -f $setup)
-$p = Start-Process -FilePath $setup -ArgumentList '/S','/UPDATE','/R' -PassThru -Wait
-$code = if ($null -eq $p.ExitCode) {{ 'null' }} else {{ [string]$p.ExitCode }}
+$p = Start-Process -FilePath $setup -ArgumentList '/S','/UPDATE','/R' -PassThru
+# Cap wait: some hosts leave the setup process around after /R relaunches the app.
+if (-not $p.WaitForExit(600000)) {{
+  Write-Log 'installer still running after 10 min; stopping waiter'
+  Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+  $code = 'timeout'
+}} else {{
+  $code = if ($null -eq $p.ExitCode) {{ 'null' }} else {{ [string]$p.ExitCode }}
+}}
 Write-Log ("installer exit code: {{0}}" -f $code)
 # `/R` should relaunch; if the new binary exists and nothing started it, start manually.
 Start-Sleep -Seconds 2
@@ -523,50 +534,38 @@ Write-Log 'done'
         app_dir = ps_quote(&app_dir),
     );
     std::fs::write(&script, body).context("writing update helper script")?;
+    // Stamp before spawn so the next launch can tell spawn was attempted even if the helper dies.
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+        let _ = writeln!(
+            f,
+            "parla: requesting helper via cmd start for {} (pid {pid})",
+            installer.display()
+        );
+    }
     log::info!("update helper script {}; log {}", script.display(), log.display());
 
-    // Prefer breaking out of the job; if the parent job forbids breakaway, still detach.
-    let mut cmd = std::process::Command::new("powershell");
+    // `start ""` needs an empty window title before the command when paths may be quoted.
+    let script_arg = script.to_string_lossy().into_owned();
+    let mut cmd = std::process::Command::new("cmd");
     cmd.args([
+        "/C",
+        "start",
+        "",
+        "/MIN",
+        "powershell.exe",
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
         "-WindowStyle",
         "Hidden",
         "-File",
-        &script.to_string_lossy(),
+        &script_arg,
     ])
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null());
-    let flags = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB;
-    cmd.creation_flags(flags);
-    match cmd.spawn() {
-        Ok(child) => {
-            log::info!("update helper pid={}", child.id());
-            Ok(())
-        }
-        Err(e) => {
-            log::warn!("update helper with BREAKAWAY failed ({e}); retrying without it");
-            let mut retry = std::process::Command::new("powershell");
-            let child = retry
-                .args([
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-File",
-                    &script.to_string_lossy(),
-                ])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-                .spawn()
-                .context("starting update helper")?;
-            log::info!("update helper pid={} (no breakaway)", child.id());
-            Ok(())
-        }
-    }
+    .stderr(std::process::Stdio::null())
+    .creation_flags(CREATE_NO_WINDOW);
+    let child = cmd.spawn().context("starting update helper via cmd start")?;
+    log::info!("update helper launcher pid={}", child.id());
+    Ok(())
 }
