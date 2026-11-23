@@ -104,7 +104,8 @@ fn main() {
             let svc = build_service(app.handle(), paths.clone())?;
             app.manage(state::AppState::new(svc));
 
-            // The webview profile lives inside our one data folder, so uninstalling removes it too.
+            // Webview profile under our data root (Windows uninstall can wipe it with the checkbox;
+            // on macOS Trash only removes the .app - Application Support stays unless the user wipes).
             let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Parla")
                 // Shorter default height so 4K @ 300% (≈1280×720 logical) still fits.

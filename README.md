@@ -47,9 +47,10 @@ Install the `*-setup.exe` (per-user, no admin). App data lives in `%LOCALAPPDATA
 
 *If Windows shows a blue warning screen on first install, proceed anyway (not paying for a code signing cert for an open source app and will not be forced on the MS store either, sorry). Code is open, feel free to scan it.*
 
-**Uninstall** (Windows Settings → Apps → Parla) stops any background model server and deletes that folder
-plus the app's webview/roaming leftovers. In-app: Settings → “Delete all my data…” wipes the same data
-without uninstalling.
+**Uninstall** (Windows Settings → Apps → Parla, or reinstall over an existing copy) stops any background
+model server. Check **Delete the application data** only if you want that folder (and webview/roaming
+leftovers) removed; leave it unchecked to keep meetings and settings. In-app: Settings → “Delete all
+my data…” wipes the same data without uninstalling.
 
 ### macOS
 
@@ -63,8 +64,8 @@ Open the universal `.dmg` and drag Parla to Applications:
 3. Permissions: the wizard and the main window check these on open. If anything is missing, Parla asks and can open System Settings → Privacy & Security:
    - **Microphone** for your voice.
    - **Screen & System Audio Recording** (enable Parla in **both** lists if macOS shows two) for what other apps play. Without these, the system meter stays flat.
-4. Data lives in `~/Library/Application Support/Parla` (survives replacing the `.app`; remove that folder or use Settings → Delete all my data if you want a clean slate).
-5. Auto-Update is not available on Mac, so the update button will take you to this repo → latest releases; download the latest `.dmg` and move it to Applications (like the first time). Gatekeeper steps above still apply.
+4. Data lives in `~/Library/Application Support/Parla` (meetings DB, models, settings, logs). Dragging a newer `.app` over the old one, or moving Parla to Trash, does **not** delete that folder. For a clean slate: Settings → Delete all my data, or remove the folder yourself.
+5. No silent in-app update on Mac: the update button opens GitHub Releases. Download the latest `.dmg`, drag Parla to Applications (replace when asked). Your Library stays. Gatekeeper steps above still apply to the new binary.
 
 *Unsigned on purpose (no Apple Developer fee for an open-source app). Code is open if you want to scan it.*
 

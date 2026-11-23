@@ -1,7 +1,12 @@
-; Parla — full-removal hooks for the Tauri NSIS installer.
-; Uninstall removes EVERYTHING the app created: the app folder (done by the template), plus
-; %LOCALAPPDATA%\Parla (downloaded models, runtime, meetings database, settings, logs, webview
-; profile) and the bundle-id folders Tauri/WebView2 may have used. Updates (/UPDATE) keep data.
+; Parla — NSIS hooks for the Tauri installer.
+; Uninstall can optionally wipe EVERYTHING the app created: %LOCALAPPDATA%\Parla
+; (models, runtime, meetings DB, settings, logs, webview profile) plus bundle-id
+; folders Tauri/WebView2 may have used.
+;
+; Match Tauri's own rule: only delete app data when the user checks
+; "Delete the application data" ($DeleteAppDataCheckboxState = 1) and this is
+; not an update (/UPDATE → $UpdateMode = 1). Leaving the box unchecked (or
+; silent uninstall without /DELETEAPPDATA) must keep Library transcripts.
 
 !macro NSIS_HOOK_PREINSTALL
 !macroend
@@ -16,7 +21,8 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  ${If} $UpdateMode <> 1
+  ${If} $DeleteAppDataCheckboxState = 1
+  ${AndIf} $UpdateMode <> 1
     SetShellVarContext current
     ; give WebView2 a moment to release its profile files after the app was closed
     Sleep 1500
