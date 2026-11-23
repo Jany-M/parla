@@ -3121,7 +3121,7 @@ dependencies = [
 
 [[package]]
 name = "parla"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "libloading 0.8.9",
@@ -3141,7 +3141,7 @@ dependencies = [
 
 [[package]]
 name = "parla-core"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "cpal",
