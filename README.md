@@ -55,13 +55,16 @@ without uninstalling.
 
 Open the universal `.dmg` and drag Parla to Applications:
 
-1. First launch: if Gatekeeper blocks the app, **right-click → Open** (once), or run:
-   `xattr -dr com.apple.quarantine /Applications/Parla.app`
-2. Grant **Microphone** in System Settings if the mic meter stays flat. For system audio (what other apps play), allow Screen Recording / system audio if macOS prompts.
-3. Data lives in `~/Library/Application Support/Parla`.
-4. Auto-Update is not available on Mac, so the update button will take you to this repo->latest releases, download the latest .dmg and move it to Applications (like the first time); Gatekeeper steps above still apply.
+1. First launch: Gatekeeper may show **"Parla" Not Opened** (unsigned build). Click **Done**, then either:
+   - **System Settings → Privacy & Security**, scroll to the Parla message, click **Open Anyway**, or
+   - In Finder: **right-click** Parla → **Open** (once), or
+   - Terminal: `xattr -dr com.apple.quarantine /Applications/Parla.app`
+2. On first launch the wizard downloads the models for **this Mac** (Apple Silicon vs Intel is detected automatically; you do not choose).
+3. Grant **Microphone** in System Settings if the mic meter stays flat. For system audio (what other apps play), allow Screen Recording / system audio if macOS prompts.
+4. Data lives in `~/Library/Application Support/Parla` (survives replacing the `.app`; remove that folder or use Settings → Delete all my data if you want a clean slate).
+5. Auto-Update is not available on Mac, so the update button will take you to this repo → latest releases; download the latest `.dmg` and move it to Applications (like the first time). Gatekeeper steps above still apply.
 
-*If the MacOS flags as unsafe/unsigned, proceed anyway (not paying an Apple Developers fee on an open source app, sorry). Code is open, feel free to scan it.*
+*Unsigned on purpose (no Apple Developer fee for an open-source app). Code is open if you want to scan it.*
 
 ## Build
 

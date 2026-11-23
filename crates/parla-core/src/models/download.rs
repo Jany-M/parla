@@ -34,6 +34,48 @@ pub fn uninstall_item(models_dir: &Path, id: &str) -> Result<()> {
     crate::paths::remove_dir_if_exists(&installed_dir(models_dir, id))
 }
 
+/// Drops installed language-model runtimes that do not match this Mac's CPU (e.g. leftover Intel
+/// build after an Apple Silicon reinstall, or a Rosetta-era download). Returns how many were removed.
+pub fn prune_incompatible_runtimes(models_dir: &Path, manifest: &super::Manifest, platform: &str, arch: &str) -> usize {
+    let mut n = 0;
+    for item in manifest.items.iter().filter(|i| i.slot == super::Slot::Runtime && i.matches_platform(platform)) {
+        if item.matches_arch(arch) || !is_installed(models_dir, &item.id) {
+            continue;
+        }
+        log::info!("removing incompatible runtime {} (this machine needs {arch})", item.id);
+        if uninstall_item(models_dir, &item.id).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Detects a broken llama.cpp macOS extract: versioned `.dylib` symlinks flattened to empty files.
+/// Older Parla builds wrote those stubs; dyld then aborts with "Library not loaded".
+pub fn ensure_runtime_dylibs(llama_server: &Path) -> Result<()> {
+    let Some(dir) = llama_server.parent() else {
+        return Ok(());
+    };
+    let stub = dir.join("libllama-common.1.dylib");
+    if !stub.exists() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        let meta = fs::symlink_metadata(&stub).with_context(|| format!("reading {}", stub.display()))?;
+        if meta.file_type().is_symlink() {
+            return Ok(());
+        }
+        if meta.len() == 0 {
+            bail!(
+                "The language-model runtime is incomplete (broken library links). \
+                 In Settings → Models, remove the language-model runtime and download it again."
+            );
+        }
+    }
+    Ok(())
+}
+
 fn sha256_file(p: &Path) -> Result<String> {
     let mut f = File::open(p)?;
     let mut h = Sha256::new();
@@ -154,7 +196,18 @@ fn safe_archive_rel(name: &str) -> Result<PathBuf> {
     Ok(p)
 }
 
+fn safe_symlink_target(target: &str) -> Result<&Path> {
+    let p = Path::new(target);
+    // Relative only, no `..` - versioned dylib links in llama.cpp releases are same-dir names.
+    anyhow::ensure!(
+        !p.is_absolute() && p.components().all(|c| matches!(c, std::path::Component::Normal(_))),
+        "unsafe symlink target in archive: {target}"
+    );
+    Ok(p)
+}
+
 /// Unpacks a `.tar.gz` into `into`, rejecting path escape (tar-slip).
+/// Symlinks are preserved on Unix (llama.cpp macOS runtimes ship versioned `.dylib` links).
 fn extract_tar_gz(archive: &Path, into: &Path) -> Result<()> {
     let file = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
     let dec = flate2::read::GzDecoder::new(file);
@@ -164,15 +217,44 @@ fn extract_tar_gz(archive: &Path, into: &Path) -> Result<()> {
         let name = entry.path().context("bad tar entry path")?.into_owned();
         let name = name.to_string_lossy();
         let rel = safe_archive_rel(&name)?;
-        let out = into.join(rel);
-        if entry.header().entry_type().is_dir() {
+        let out = into.join(&rel);
+        let kind = entry.header().entry_type();
+        if kind.is_dir() {
             fs::create_dir_all(&out)?;
-        } else {
-            if let Some(p) = out.parent() {
-                fs::create_dir_all(p)?;
+            continue;
+        }
+        if let Some(p) = out.parent() {
+            fs::create_dir_all(p)?;
+        }
+        if kind.is_symlink() {
+            let target = entry
+                .link_name()?
+                .context("symlink without target")?
+                .into_owned();
+            let target = target.to_string_lossy();
+            let target = safe_symlink_target(&target)?;
+            let _ = fs::remove_file(&out);
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink(target, &out)
+                    .with_context(|| format!("creating symlink {}", out.display()))?;
             }
-            let mut dest = File::create(&out)?;
-            std::io::copy(&mut entry, &mut dest)?;
+            #[cfg(not(unix))]
+            {
+                // macOS runtimes are never installed on Windows; materialize when the target exists.
+                let src = out.parent().unwrap_or(into).join(target);
+                if src.is_file() {
+                    fs::copy(&src, &out)?;
+                }
+            }
+            continue;
+        }
+        let mut dest = File::create(&out)?;
+        std::io::copy(&mut entry, &mut dest)?;
+        #[cfg(unix)]
+        if let Ok(mode) = entry.header().mode() {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&out, fs::Permissions::from_mode(mode));
         }
     }
     Ok(())
@@ -188,6 +270,14 @@ fn ensure_llama_executable(dir: &Path) -> Result<()> {
             perms.set_mode(perms.mode() | 0o755);
             fs::set_permissions(&p, perms)?;
         }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Downloaded unsigned binaries can carry Gatekeeper quarantine and abort on spawn.
+        let _ = std::process::Command::new("xattr")
+            .args(["-dr", "com.apple.quarantine"])
+            .arg(dir)
+            .status();
     }
     Ok(())
 }
@@ -446,11 +536,116 @@ mod tests {
         assert!(!dir.join("rt.tar.gz").exists());
     }
 
+    fn make_tar_gz_with_symlink(file_name: &str, body: &[u8], link_name: &str, link_target: &str) -> Vec<u8> {
+        let mut raw = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut raw);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder.append_data(&mut header, file_name, body).unwrap();
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_size(0);
+            link.set_mode(0o777);
+            link.set_path(link_name).unwrap();
+            link.set_link_name(link_target).unwrap();
+            link.set_cksum();
+            builder.append(&link, std::io::empty()).unwrap();
+            builder.finish().unwrap();
+        }
+        let mut out = Vec::new();
+        let mut enc = flate2::write::GzEncoder::new(&mut out, flate2::Compression::fast());
+        enc.write_all(&raw).unwrap();
+        enc.finish().unwrap();
+        out
+    }
+
+    #[test]
+    fn tar_gz_preserves_versioned_dylib_symlinks() {
+        // llama.cpp macOS builds ship libfoo.1.dylib -> libfoo.1.0.0.dylib; flattening those to
+        // empty files makes dyld abort with "Library not loaded".
+        let z = make_tar_gz_with_symlink(
+            "llama-b/libllama-common.1.0.0.dylib",
+            b"REALDYLIB",
+            "llama-b/libllama-common.1.dylib",
+            "libllama-common.1.0.0.dylib",
+        );
+        let srv = serve(vec![("rt.tar.gz", z.clone())]);
+        let t = tempfile::tempdir().unwrap();
+        let mut s = spec(&srv.base, "rt.tar.gz", &z);
+        s.extract = true;
+        let dir = install_item(t.path(), &item("rt-mac", vec![s]), &Cancel::default(), &mut |_, _| {}).unwrap();
+        let link = dir.join("llama-b/libllama-common.1.dylib");
+        let real = dir.join("llama-b/libllama-common.1.0.0.dylib");
+        assert_eq!(fs::read(&real).unwrap(), b"REALDYLIB");
+        #[cfg(unix)]
+        {
+            let meta = fs::symlink_metadata(&link).unwrap();
+            assert!(meta.file_type().is_symlink(), "must stay a symlink, not an empty file");
+            assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("libllama-common.1.0.0.dylib"));
+            assert_eq!(fs::read(&link).unwrap(), b"REALDYLIB");
+        }
+        #[cfg(not(unix))]
+        {
+            assert_eq!(fs::read(&link).unwrap(), b"REALDYLIB", "Windows materializes the symlink target");
+        }
+    }
+
     #[test]
     fn archive_relative_paths_reject_escape() {
         assert!(safe_archive_rel("../evil.txt").is_err());
         assert!(safe_archive_rel("/abs/evil.txt").is_err());
         assert!(safe_archive_rel("llama-b/llama-server").is_ok());
+    }
+
+    #[test]
+    fn ensure_runtime_dylibs_is_a_noop_for_windows_style_layouts() {
+        // Windows ships real .dlls next to llama-server.exe, not versioned .dylib symlinks.
+        let t = tempfile::tempdir().unwrap();
+        let exe = t.path().join("llama-server.exe");
+        fs::write(&exe, b"EXE").unwrap();
+        fs::write(t.path().join("llama.dll"), b"DLL").unwrap();
+        ensure_runtime_dylibs(&exe).unwrap();
+    }
+
+    #[test]
+    fn prune_incompatible_runtimes_keeps_only_this_machines_arch() {
+        use super::super::manifest::{Item, Manifest, Slot};
+        let m = Manifest {
+            version: 1,
+            items: vec![
+                Item {
+                    id: "rt-mac-arm".into(),
+                    slot: Slot::Runtime,
+                    label: "arm".into(),
+                    description: String::new(),
+                    license: "MIT".into(),
+                    platform: "macos".into(),
+                    arch: Some("arm64".into()),
+                    files: vec![],
+                },
+                Item {
+                    id: "rt-mac-x64".into(),
+                    slot: Slot::Runtime,
+                    label: "x64".into(),
+                    description: String::new(),
+                    license: "MIT".into(),
+                    platform: "macos".into(),
+                    arch: Some("x64".into()),
+                    files: vec![],
+                },
+            ],
+        };
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir_all(t.path().join("rt-mac-arm")).unwrap();
+        fs::write(t.path().join("rt-mac-arm/.installed"), b"ok").unwrap();
+        fs::create_dir_all(t.path().join("rt-mac-x64")).unwrap();
+        fs::write(t.path().join("rt-mac-x64/.installed"), b"ok").unwrap();
+        assert_eq!(prune_incompatible_runtimes(t.path(), &m, "macos", "arm64"), 1);
+        assert!(is_installed(t.path(), "rt-mac-arm"));
+        assert!(!is_installed(t.path(), "rt-mac-x64"));
     }
 
     #[test]

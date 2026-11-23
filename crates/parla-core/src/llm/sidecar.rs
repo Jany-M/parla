@@ -36,11 +36,18 @@ impl LlamaServer {
         }
         let port = free_port()?;
         let mut cmd = Command::new(&cfg.exe);
+        // CPU-only: matches the Windows zip and the catalog copy ("runs on your CPU").
+        // Official macOS llama.cpp builds default to Metal, which can SIGABRT on some Macs.
         cmd.arg("-m").arg(&cfg.model)
             .args(["--host", "127.0.0.1", "--port", &port.to_string()])
             .args(["-c", &cfg.ctx.to_string(), "-t", &cfg.threads.to_string(), "-np", "1"])
+            .args(["--n-gpu-layers", "0"])
             .stdin(Stdio::null())
             .stdout(Stdio::null());
+        // Sibling dylibs in the extracted runtime resolve via @loader_path when cwd is the bin dir.
+        if let Some(dir) = cfg.exe.parent() {
+            cmd.current_dir(dir);
+        }
         match cfg.log_file.as_ref().and_then(|p| std::fs::OpenOptions::new().create(true).append(true).open(p).ok()) {
             Some(f) => cmd.stderr(Stdio::from(f)),
             None => cmd.stderr(Stdio::null()),
@@ -54,9 +61,14 @@ impl LlamaServer {
         let mut me = Self { child, port };
         let probe = LlmClient::new(&me.base_url(), "local", None, Duration::from_secs(2))?;
         let start = Instant::now();
+        let log_hint = cfg
+            .log_file
+            .as_ref()
+            .map(|p| format!("see {}", p.display()))
+            .unwrap_or_else(|| "see the log in the app folder".into());
         loop {
             if let Some(status) = me.child.try_wait()? {
-                bail!("language-model runtime exited early ({status}); see the log in the app folder");
+                bail!("language-model runtime exited early ({status}); {log_hint}");
             }
             if probe.is_ready() {
                 return Ok(me);

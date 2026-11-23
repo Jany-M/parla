@@ -113,6 +113,14 @@ impl Service {
         hw: hardware::HardwareInfo,
     ) -> Result<Arc<Self>> {
         paths.ensure_dirs()?;
+        // Mac: only one llama.cpp build is valid (arm64 vs Intel). Drop the other so Wizard /
+        // Settings never keep a Rosetta-era or leftover wrong-arch runtime after reinstall.
+        let _ = models::download::prune_incompatible_runtimes(
+            &paths.models_dir(),
+            &manifest,
+            current_platform(),
+            crate::models::manifest::current_arch(),
+        );
         let store = Store::open(&paths.db_path())?;
         store.close_dangling_meetings()?; // a crash/kill must not leave "recording…" meetings behind
         let settings = Settings::load(&paths.settings_path());
@@ -280,6 +288,7 @@ impl Service {
             .ok_or_else(|| anyhow!("The language-model runtime is not installed yet. Open Settings → Models to download it."))?;
         let exe_name = if cfg!(windows) { "llama-server.exe" } else { "llama-server" };
         let exe = find_file(&runtime, &|n| n == exe_name).ok_or_else(|| anyhow!("llama-server was not found in the installed runtime"))?;
+        models::download::ensure_runtime_dylibs(&exe)?;
         let server = LlamaServer::start(&LlamaConfig {
             exe,
             model: gguf,

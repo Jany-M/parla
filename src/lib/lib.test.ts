@@ -116,6 +116,8 @@ describe("models", () => {
     expect(missing(m)).toHaveLength(m.length);
     const f = featureItems(m, "translate");
     expect(f.length).toBeGreaterThan(0);
+    expect(f.some((x) => x.slot === "runtime")).toBe(true);
+    expect(f.some((x) => x.slot === "translate")).toBe(true);
     expect(batchProgress(f, null)).toBe(0);
     expect(batchProgress(f, { id: f[0].id, done: f[0].size_bytes, total: f[0].size_bytes })).toBeGreaterThan(0);
     expect(totalBytes(f)).toBeGreaterThan(0);

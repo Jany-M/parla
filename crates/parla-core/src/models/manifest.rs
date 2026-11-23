@@ -83,7 +83,35 @@ pub fn current_platform() -> &'static str {
 }
 
 /// Manifest `arch` values: `x64` / `arm64` (not Rust's `x86_64` / `aarch64` names).
+///
+/// On macOS this is the **hardware** arch. A universal Parla binary under Rosetta still reports
+/// `x86_64` from Rust, which would wrongly download the Intel llama.cpp build on Apple Silicon.
 pub fn current_arch() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        static ARCH: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+        return *ARCH.get_or_init(macos_hardware_arch);
+    }
+    #[cfg(not(target_os = "macos"))]
+    match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_hardware_arch() -> &'static str {
+    // `hw.optional.arm64` is 1 on Apple Silicon even when this process is Rosetta-translated.
+    if std::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", "hw.optional.arm64"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .is_some_and(|s| s.trim() == "1")
+    {
+        return "arm64";
+    }
     match std::env::consts::ARCH {
         "x86_64" => "x64",
         "aarch64" => "arm64",
