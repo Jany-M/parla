@@ -66,6 +66,11 @@ Open the universal `.dmg` and drag Parla to Applications:
 
 *Unsigned on purpose (no Apple Developer fee for an open-source app). Code is open if you want to scan it.*
 
+<img width="1995" height="1365" alt="Screenshot 2026-11-23 113354" src="https://github.com/user-attachments/assets/1b3bb3ac-87d8-480b-a104-f35f2fc982cd" />
+<img width="1977" height="1365" alt="Screenshot 2026-11-23 121912" src="https://github.com/user-attachments/assets/b36776c5-55cc-4c4f-b7a2-07c46ade773a" />
+<img width="1992" height="1359" alt="Screenshot 2026-11-23 121952" src="https://github.com/user-attachments/assets/080e49d0-6eef-469f-b4b2-24955cffd861" />
+
+
 ## Build
 
 ### Windows installer
