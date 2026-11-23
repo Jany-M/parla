@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { PermissionsCard } from "./components/PermissionsCard";
 import { AppProvider } from "./context";
 import { useT } from "./i18n";
 import { api } from "./lib/api";
@@ -160,11 +161,12 @@ function Shell({ version }: { version: string }) {
         ))}
         <SidebarFooter version={version} />
       </nav>
-      <div className="h-full min-w-0 flex-1 overflow-hidden">
+      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        <PermissionsCard className="mx-6 mt-4 shrink-0" />
         {/* Record stays mounted so a running recording's view is never lost when browsing */}
-        <div className={view === "record" ? "h-full" : "hidden"}><Record goTo={(v) => setView(v)} /></div>
-        {view === "library" && <Library goTo={(v) => setView(v)} />}
-        {view === "settings" && <Settings />}
+        <div className={view === "record" ? "min-h-0 flex-1" : "hidden"}><Record goTo={(v) => setView(v)} /></div>
+        {view === "library" && <div className="min-h-0 flex-1 overflow-hidden"><Library goTo={(v) => setView(v)} /></div>}
+        {view === "settings" && <div className="min-h-0 flex-1 overflow-hidden"><Settings /></div>}
       </div>
     </div>
   );

@@ -54,6 +54,15 @@ export interface SystemInfo {
 }
 export interface AppInfo { version: string; system: SystemInfo }
 
+/** macOS mic + Screen & System Audio Recording. `required` is false on Windows. */
+export type PermState = "granted" | "denied" | "not_determined" | "unknown";
+export interface CapturePermissions {
+  required: boolean;
+  microphone: PermState;
+  screen_recording: PermState;
+  system_audio: PermState;
+}
+
 /** Newer GitHub Release available for this install. */
 export interface UpdateInfo {
   version: string;

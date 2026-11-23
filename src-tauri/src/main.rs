@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod macos_permissions;
 mod state;
 
 use parla_core::logging::FileLogger;
@@ -157,6 +158,9 @@ fn main() {
             commands::app_info,
             commands::open_logs,
             commands::open_url,
+            commands::capture_permissions,
+            commands::request_capture_permissions,
+            commands::open_capture_permission_settings,
             commands::log_ui_error,
             commands::get_settings,
             commands::save_settings,

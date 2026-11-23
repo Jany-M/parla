@@ -4,5 +4,8 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Parla records your microphone so it can transcribe what you say in meetings.</string>
+	<!-- Required for Core Audio process taps (system / meeting audio) on macOS 14.2+. Without this key the OS only asks for the mic and loopback is silent. -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Parla captures what other apps play (meetings, videos, calls) so it can transcribe other speakers on this Mac.</string>
 </dict>
 </plist>

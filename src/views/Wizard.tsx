@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PermissionsCard } from "../components/PermissionsCard";
 import { Banner, Button, Card, ProgressBar, Toggle } from "../components/ui";
 import { useApp } from "../context";
 import { useT } from "../i18n";
@@ -72,6 +73,7 @@ export function Wizard() {
             </p>
           )}
         </Card>
+        <PermissionsCard />
         {warn && <Banner kind="warn">{warn}</Banner>}
         {error && <Banner onClose={() => setError(null)}>{error}</Banner>}
 

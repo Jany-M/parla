@@ -1,5 +1,5 @@
 import type {
-  AppInfo, Devices, Lang, MeetingDetail, MeetingListItem, ModelProgress, ModelStatus, ParlaEvent, Settings, SummaryProgress,
+  AppInfo, CapturePermissions, Devices, Lang, MeetingDetail, MeetingListItem, ModelProgress, ModelStatus, ParlaEvent, Settings, SummaryProgress,
   UpdateInfo, UpdateProgress,
 } from "./types";
 
@@ -20,6 +20,10 @@ export interface Api {
   recordingState(): Promise<number | null>;
   openLogs(): Promise<void>;
   openUrl(url: string): Promise<void>;
+  /** macOS capture permissions (mic + screen/system audio). Always OK on Windows. */
+  capturePermissions(): Promise<CapturePermissions>;
+  requestCapturePermissions(): Promise<CapturePermissions>;
+  openCapturePermissionSettings(): Promise<void>;
   logUiError(message: string): Promise<void>;
   checkForUpdate(): Promise<UpdateInfo | null>;
   installUpdate(): Promise<void>;
@@ -77,6 +81,9 @@ async function realApi(): Promise<Api> {
     recordingState: () => invoke("recording_state"),
     openLogs: () => invoke("open_logs"),
     openUrl: (url) => invoke("open_url", { url }),
+    capturePermissions: () => invoke("capture_permissions"),
+    requestCapturePermissions: () => invoke("request_capture_permissions"),
+    openCapturePermissionSettings: () => invoke("open_capture_permission_settings"),
     logUiError: (message) => invoke("log_ui_error", { message }),
     checkForUpdate: () => invoke("check_for_update"),
     installUpdate: () => invoke("install_update"),

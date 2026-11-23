@@ -127,6 +127,21 @@ export function createMockApi(opts: { installed?: boolean; ramMb?: number; updat
       }
       return Promise.resolve();
     },
+    capturePermissions: () =>
+      track("capturePermissions", {
+        required: false,
+        microphone: "granted",
+        screen_recording: "granted",
+        system_audio: "granted",
+      }),
+    requestCapturePermissions: () =>
+      track("requestCapturePermissions", {
+        required: false,
+        microphone: "granted",
+        screen_recording: "granted",
+        system_audio: "granted",
+      }),
+    openCapturePermissionSettings: () => track("openCapturePermissionSettings", undefined),
     logUiError: (m) => track(`logUiError:${m}`, undefined),
     checkForUpdate: () => track("checkForUpdate", update),
     installUpdate: async () => {

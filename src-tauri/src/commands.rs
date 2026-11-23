@@ -51,6 +51,24 @@ pub fn open_logs(s: State<AppState>) -> Res<()> {
     })
 }
 
+/// Mic / screen / system-audio permission snapshot (macOS; always OK elsewhere).
+#[tauri::command]
+pub fn capture_permissions() -> crate::macos_permissions::CapturePermissions {
+    crate::macos_permissions::status()
+}
+
+/// Ask for any missing capture permissions (shows system prompts when possible).
+#[tauri::command]
+pub fn request_capture_permissions() -> crate::macos_permissions::CapturePermissions {
+    crate::macos_permissions::request_missing()
+}
+
+/// Opens System Settings to the Privacy panes for Microphone and Screen & System Audio.
+#[tauri::command]
+pub fn open_capture_permission_settings() -> Res<()> {
+    crate::macos_permissions::open_settings()
+}
+
 /// Opens an http(s) URL in the default browser (new window/tab).
 #[tauri::command]
 pub fn open_url(url: String) -> Res<()> {
