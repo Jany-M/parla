@@ -85,7 +85,8 @@ mod macos {
                 "/System/Library/PrivateFrameworks/TCC.framework/TCC",
                 "/System/Library/Frameworks/TCC.framework/TCC",
             ] {
-                let Ok(lib) = libloading::Library::new(path) else { continue };
+                // SAFETY: loading Apple's system TCC dylib by absolute path; we only read symbols.
+                let Ok(lib) = (unsafe { libloading::Library::new(path) }) else { continue };
                 let lib = Box::leak(Box::new(lib));
                 unsafe {
                     preflight = lib.get::<TccPreflight>(b"TCCAccessPreflight\0").ok().map(|s| *s);
