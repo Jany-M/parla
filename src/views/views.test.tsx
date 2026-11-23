@@ -213,6 +213,16 @@ describe("settings", () => {
     await userEvent.type(addr, "https://api.example.com");
     expect(await screen.findByText(/not on your computer/i)).toBeInTheDocument();
   });
+  it("keeps local-file and endpoint drafts so path and server fields stay visible", async () => {
+    await ready();
+    await openSettings();
+    await userEvent.selectOptions(await screen.findByLabelText("Translation"), "endpoint");
+    expect(await screen.findByLabelText(/translation address/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/translation model name/i)).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Summaries"), "local_file");
+    expect(await screen.findByLabelText(/summaries path/i)).toBeInTheDocument();
+    expect(mock.calls.filter((c) => c === "saveSettings").length).toBeGreaterThanOrEqual(2);
+  });
   it("delete-all needs confirmation", async () => {
     await ready();
     await openSettings();

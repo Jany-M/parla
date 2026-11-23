@@ -145,7 +145,21 @@ export function Settings() {
                   <div className="space-y-1">
                     <div className="flex gap-2">
                       <input aria-label={`${slotLabel} path`} value={c.path} onChange={(e) => void setSlot(k, { kind: "local_file", path: e.target.value })} className="min-w-0 flex-1 rounded-lg border border-line bg-raised px-3 py-2 text-sm text-slate-100 outline-none focus:border-accent" />
-                      <Button onClick={async () => { const p = await api().pickFolder(); if (p) await setSlot(k, { kind: "local_file", path: p }); }}>{t("settings.slot.browse")}</Button>
+                      <Button
+                        onClick={async () => {
+                          const p =
+                            k === "stt"
+                              ? await api().pickFolder()
+                              : await api().pickModelFile(
+                                  k === "speaker"
+                                    ? [{ name: "ONNX", extensions: ["onnx"] }]
+                                    : [{ name: "GGUF", extensions: ["gguf"] }],
+                                );
+                          if (p) await setSlot(k, { kind: "local_file", path: p });
+                        }}
+                      >
+                        {t("settings.slot.browse")}
+                      </Button>
                     </div>
                     <p className="text-xs text-mute">{t(LOCAL_HINT_KEY[k])}</p>
                   </div>

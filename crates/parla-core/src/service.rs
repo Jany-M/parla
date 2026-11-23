@@ -678,15 +678,24 @@ mod tests {
         let mut s = svc.settings();
         s.target_lang = "xx".into();
         assert!(svc.update_settings(s).is_err());
+        let bad = t.path().join("not-a-model.txt");
+        std::fs::write(&bad, b"nope").unwrap();
         let mut s = svc.settings();
-        s.slots.summarize = SlotChoice::LocalFile { path: "/does/not/exist.gguf".into() };
-        assert!(svc.update_settings(s).is_err());
+        s.slots.summarize = SlotChoice::LocalFile { path: bad.to_string_lossy().into() };
+        assert!(svc.update_settings(s).is_err(), "existing wrong file must be rejected");
+        // Switching to local/endpoint with an empty draft must stick so the Settings form can appear.
+        let mut s = svc.settings();
+        s.slots.translate = SlotChoice::Endpoint { url: "http://127.0.0.1:1234".into(), model: String::new(), api_key: None };
+        s.slots.summarize = SlotChoice::LocalFile { path: String::new() };
+        svc.update_settings(s).unwrap();
         let mut s = svc.settings();
         s.target_lang = "fr".into();
         s.onboarding_done = true;
         svc.update_settings(s).unwrap();
         let again = Service::new(AppPaths::new(t.path().join("Parla")), Manifest::default(), sink, texts(&[]), Arc::new(|_| Ok(vec![]))).unwrap();
         assert_eq!((again.settings().target_lang.as_str(), again.settings().onboarding_done), ("fr", true));
+        assert_eq!(again.settings().slots.translate, SlotChoice::Endpoint { url: "http://127.0.0.1:1234".into(), model: String::new(), api_key: None });
+        assert_eq!(again.settings().slots.summarize, SlotChoice::LocalFile { path: String::new() });
     }
 
     #[test]

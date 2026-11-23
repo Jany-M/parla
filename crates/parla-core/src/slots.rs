@@ -96,23 +96,37 @@ pub fn smoke_test(model: &dyn ChatModel) -> Result<()> {
     Ok(())
 }
 
-/// Validates what the user typed for a slot without starting anything heavy.
-/// `llm_slot`: translate/summarize accept endpoints and .gguf; stt/speaker accept folders/.onnx.
+/// Validates a slot choice for Settings save.
+///
+/// Empty local paths and empty endpoint model names are allowed as drafts so the UI can switch
+/// source kind and show the path/URL fields before the user finishes filling them. Missing paths
+/// are also allowed while typing; once a path exists on disk it must be the right kind of file.
+/// Runtime use (`chat_model`, STT load, etc.) still fails clearly if a draft is incomplete.
 pub fn validate_choice(choice: &SlotChoice, slot: crate::models::Slot) -> Result<()> {
     use crate::models::Slot::*;
     match (choice, slot) {
         (SlotChoice::Managed { .. }, _) => Ok(()),
-        (SlotChoice::LocalFile { path }, Stt) => find_transducer_files(Path::new(path)).map(|_| ()),
-        (SlotChoice::LocalFile { path }, Speaker) => validate_onnx(Path::new(path)),
-        (SlotChoice::LocalFile { path }, Translate | Summarize) => validate_gguf(Path::new(path)),
-        (SlotChoice::Endpoint { url, model, .. }, Translate | Summarize) => {
-            validate_endpoint_url(url)?;
-            ensure!(!model.trim().is_empty(), "enter the model name");
-            Ok(())
+        (SlotChoice::LocalFile { path }, Stt) => validate_local(path, |p| find_transducer_files(p).map(|_| ())),
+        (SlotChoice::LocalFile { path }, Speaker) => validate_local(path, validate_onnx),
+        (SlotChoice::LocalFile { path }, Translate | Summarize) => validate_local(path, validate_gguf),
+        (SlotChoice::Endpoint { url, .. }, Translate | Summarize) => {
+            // Empty model name is allowed as a draft while the Settings form is being filled.
+            validate_endpoint_url(url)
         }
         (SlotChoice::Endpoint { .. }, _) => bail!("only the translation and summary models can use an endpoint"),
         (SlotChoice::LocalFile { .. }, _) => bail!("this slot cannot use a local file"),
     }
+}
+
+fn validate_local(path: &str, check: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+    if path.trim().is_empty() {
+        return Ok(());
+    }
+    let p = Path::new(path);
+    if !p.exists() {
+        return Ok(());
+    }
+    check(p)
 }
 
 #[cfg(test)]
@@ -173,10 +187,16 @@ mod tests {
         let ep = SlotChoice::Endpoint { url: "http://localhost:1234".into(), model: "qwen".into(), api_key: None };
         assert!(validate_choice(&ep, Slot::Summarize).is_ok());
         assert!(validate_choice(&ep, Slot::Stt).is_err());
-        let no_model = SlotChoice::Endpoint { url: "http://localhost:1234".into(), model: " ".into(), api_key: None };
-        assert!(validate_choice(&no_model, Slot::Translate).is_err());
+        // Empty model / path are drafts so Settings can show the form before the user finishes.
+        let draft_ep = SlotChoice::Endpoint { url: "http://localhost:1234".into(), model: " ".into(), api_key: None };
+        assert!(validate_choice(&draft_ep, Slot::Translate).is_ok());
+        assert!(validate_choice(&SlotChoice::LocalFile { path: String::new() }, Slot::Summarize).is_ok());
+        assert!(validate_choice(&SlotChoice::LocalFile { path: "/nope-missing".into() }, Slot::Speaker).is_ok());
         assert!(validate_choice(&SlotChoice::default(), Slot::Stt).is_ok());
-        assert!(validate_choice(&SlotChoice::LocalFile { path: "/nope".into() }, Slot::Speaker).is_err());
+        let t = tempfile::tempdir().unwrap();
+        let wrong = t.path().join("notes.txt");
+        std::fs::write(&wrong, b"hi").unwrap();
+        assert!(validate_choice(&SlotChoice::LocalFile { path: wrong.to_string_lossy().into() }, Slot::Speaker).is_err());
     }
 
     #[test]

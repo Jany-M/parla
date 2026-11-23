@@ -50,6 +50,8 @@ export interface Api {
   pickAudioFile(): Promise<string | null>;
   pickSavePath(defaultName: string): Promise<string | null>;
   pickFolder(): Promise<string | null>;
+  /** Local .onnx / .gguf (or any file) for speaker / LLM slots. */
+  pickModelFile(filters: { name: string; extensions: string[] }[]): Promise<string | null>;
 }
 
 export const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -114,6 +116,10 @@ async function realApi(): Promise<Api> {
     pickSavePath: async (name) => (await dialog.save({ defaultPath: name, filters: [{ name: "Markdown", extensions: ["md"] }] })) ?? null,
     pickFolder: async () => {
       const r = await dialog.open({ directory: true, multiple: false });
+      return typeof r === "string" ? r : null;
+    },
+    pickModelFile: async (filters) => {
+      const r = await dialog.open({ multiple: false, filters });
       return typeof r === "string" ? r : null;
     },
   };

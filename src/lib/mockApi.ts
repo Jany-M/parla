@@ -171,6 +171,7 @@ export function createMockApi(opts: { installed?: boolean; ramMb?: number; updat
     pickAudioFile: () => track("pickAudioFile", "C:\\audio\\call.wav"),
     pickSavePath: (n) => track("pickSavePath", `C:\\out\\${n}`),
     pickFolder: () => track("pickFolder", "C:\\models\\mine"),
+    pickModelFile: () => track("pickModelFile", "C:\\models\\mine\\model.gguf"),
   };
   return api;
 }
